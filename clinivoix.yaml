@@ -1,0 +1,472 @@
+
+system:
+  name: "ClinivoxAI"
+  version: "2.0.0"
+  environment: "production" # development, staging, production
+  timezone: "America/New_York"
+  language_primary: "en-US"
+  languages_supported:
+    - "en-US"
+    - "es-US"
+    - "fr-CA"
+    - "zh-CN"
+  
+  # Healthcare Platform Integrations
+  integrations:
+    epic:
+      enabled: true
+      api_version: "2021"
+      endpoints:
+        patient_search: "/api/FHIR/R4/Patient"
+        appointments: "/api/FHIR/R4/Appointment"
+        medications: "/api/FHIR/R4/MedicationRequest"
+        allergies: "/api/FHIR/R4/AllergyIntolerance"
+      authentication:
+        type: "oauth2"
+        scopes: ["patient/*.read", "patient/*.write"]
+    
+    cerner:
+      enabled: false
+      api_version: "R4"
+    
+    allscripts:
+      enabled: false
+
+# ============================================================================
+# PRACTICE CONFIGURATION
+# ============================================================================
+practice:
+  name: "[PRACTICE_NAME]"
+  type: "family_medicine" # family_medicine, internal_medicine, pediatrics, specialty
+  phone: "+1-555-0123"
+  address:
+    street: "123 Medical Drive"
+    city: "Healthcare City"
+    state: "CA"
+    zip: "90210"
+  
+  business_hours:
+    monday: { open: "08:00", close: "17:00" }
+    tuesday: { open: "08:00", close: "17:00" }
+    wednesday: { open: "08:00", close: "17:00" }
+    thursday: { open: "08:00", close: "17:00" }
+    friday: { open: "08:00", close: "17:00" }
+    saturday: { open: "09:00", close: "12:00" }
+    sunday: { closed: true }
+  
+  walk_in_hours:
+    enabled: true
+    days: ["monday", "tuesday", "wednesday", "thursday", "friday"]
+    start_time: "08:00"
+    end_time: "10:00"
+
+# ============================================================================
+# AI ASSISTANT CONFIGURATION
+# ============================================================================
+assistant:
+  identity:
+    name: "[CONFIGURED_NAME]"
+    role: "Medical Receptionist"
+    personality_traits:
+      - "warm"
+      - "professional" 
+      - "efficient"
+      - "empathetic"
+      - "adaptive"
+  
+  capabilities:
+    automation_percentage: 85
+    hipaa_compliant: true
+    multi_language: true
+    context_preservation: true
+    real_time_scheduling: true
+    
+  conversation_settings:
+    response_length:
+      simple_tasks: 15 # words
+      complex_tasks: 30 # words
+      emergency_situations: 50 # words
+    
+    wait_times:
+      system_lookup: 2 # seconds
+      processing_pause: 1 # seconds
+      transfer_hold: 3 # seconds
+    
+    voice_settings:
+      speed: 1.0
+      pitch: 0.0
+      emotion_adaptation: true
+
+# ============================================================================
+# CONVERSATION TEMPLATES
+# ============================================================================
+conversation_templates:
+  
+  # Universal Responses
+  universal:
+    greeting: "Thank you for calling {practice_name}. This is {assistant_name}. How may I help you today?"
+    
+    hold_messages:
+      - "Let me check that for you..."
+      - "One moment while I look that up..."
+      - "Please hold while I access your information..."
+    
+    clarification: "I want to make sure I understand - you're asking about {query}, correct?"
+    
+    empathy_responses:
+      frustration: "I understand this is frustrating. Let me help you resolve this."
+      concern: "I can hear the concern in your voice. Let's get this taken care of."
+      urgency: "I understand this is urgent. Let me find the best way to help you right away."
+      pain: "I'm sorry you're experiencing pain. Let's get you the care you need."
+    
+    transfer: "I'll connect you with someone who can best assist with that. Please hold for just a moment."
+    
+    error_handling:
+      connection_issue: "I'm having a slight connection issue. Could you please repeat that?"
+      unclear_input: "I didn't quite catch that. Could you say that again?"
+      system_error: "I apologize for the technical difficulty. Let me transfer you to our staff right away."
+  
+  # Language Detection and Switching
+  language_detection:
+    spanish_detected: "¿Prefiere continuar en español? I can help you in Spanish if you'd prefer."
+    french_detected: "Préférez-vous continuer en français? I can assist you in French."
+    chinese_detected: "您希望用中文继续吗？I can help you in Chinese if needed."
+
+# ============================================================================
+# MODULE CONFIGURATIONS
+# ============================================================================
+modules:
+  
+  # Appointment Management Module
+  appointment_management:
+    triggers:
+      - "appointment"
+      - "schedule"
+      - "book"
+      - "cancel"
+      - "reschedule"
+      - "available"
+      - "opening"
+      - "when can I be seen"
+      - "next available"
+    
+    appointment_types:
+      routine_exam:
+        duration: 30
+        prep_instructions: "Please fast for 12 hours if you'd like lab work done."
+        aliases: ["check-up", "physical", "annual", "wellness"]
+      
+      sick_visit:
+        duration: 15
+        prep_instructions: "Please bring a list of your current symptoms."
+        aliases: ["sick", "not feeling well", "illness"]
+      
+      follow_up:
+        duration: 15
+        prep_instructions: "Please bring any test results or reports since your last visit."
+        aliases: ["follow up", "recheck", "follow-up"]
+      
+      new_concern:
+        duration: 30
+        prep_instructions: "Please prepare to describe when the problem started and any treatments you've tried."
+        aliases: ["new problem", "first time", "never had this before"]
+    
+    confirmation_template: "Perfect! I have you scheduled with {provider} on {date} at {time} for a {visit_type}. The address is {location}. Please arrive 10 minutes early."
+    
+    cancellation_policy:
+      notice_required: 24 # hours
+      fee_amount: 25 # dollars
+      fee_message: "Please note there may be a ${fee_amount} late cancellation fee for appointments cancelled with less than {notice_required} hours notice."
+  
+  # Clinical Triage Module
+  clinical_triage:
+    triggers:
+      - "pain"
+      - "hurt"
+      - "emergency"
+      - "urgent"
+      - "can't breathe"
+      - "bleeding"
+      - "fever"
+      - "chest pain"
+      - "allergic reaction"
+    
+    emergency_keywords:
+      immediate_911:
+        - "chest pain"
+        - "chest pressure"
+        - "can't breathe"
+        - "difficulty breathing"
+        - "shortness of breath"
+        - "confusion"
+        - "can't speak"
+        - "severe headache"
+        - "uncontrolled bleeding"
+        - "suicide"
+        - "kill myself"
+        - "allergic reaction"
+        - "anaphylaxis"
+      
+      urgent_same_day:
+        - "severe pain"
+        - "high fever"
+        - "vomiting"
+        - "dehydration"
+        - "injury"
+        - "medication reaction"
+    
+    pain_scale_responses:
+      mild: "1-3"
+      moderate: "4-6"
+      severe: "7-10"
+    
+    pediatric_red_flags:
+      - "high fever in infant"
+      - "not eating"
+      - "lethargic"
+      - "difficulty breathing"
+      - "dehydration"
+    
+    emergency_response: "This sounds like it needs immediate attention. I'm going to recommend you call 911 or go to the nearest emergency room right away. Would you like me to stay on the line while you call 911?"
+    
+    urgent_response: "Based on what you've told me, it would be best to have this evaluated today. We have a same-day appointment available at {time}. Would that work for you?"
+  
+  # Prescription Management Module
+  prescription_management:
+    triggers:
+      - "refill"
+      - "prescription"
+      - "medication"
+      - "pharmacy"
+      - "pills"
+      - "ran out"
+      - "need more"
+      - "medicine"
+    
+    refill_scenarios:
+      available: "Good news! You have {count} refills remaining. Which pharmacy should I send this to?"
+      
+      expired: "This prescription needs to be renewed by your provider. I'll send a request to Dr. {provider_name}. This typically takes 24-48 hours."
+      
+      too_early: "This medication isn't due for refill until {date}. You should have about {days} days of medication left."
+      
+      controlled_substance: "For this medication, you'll need to schedule an appointment. Dr. {provider_name} requires a visit every {frequency} for this prescription."
+    
+    special_situations:
+      lost_stolen: "I understand your medication was {situation}. For controlled substances, you'll need to file a police report and bring it to your appointment."
+      
+      travel: "I'll request an extended supply for your trip. Please allow 3 days for processing."
+      
+      cost_concern: "I understand cost is a concern. Would you like information about generic alternatives or manufacturer coupons?"
+  
+  # Test Results Module
+  test_results:
+    triggers:
+      - "test results"
+      - "lab results"
+      - "blood work"
+      - "x-ray"
+      - "CT scan"
+      - "MRI"
+      - "biopsy"
+      - "pathology"
+    
+    result_status_responses:
+      available: "Your {test_type} results are available. Dr. {provider} would like to discuss them with you. Would you like to schedule an appointment?"
+      
+      pending: "Your {test_type} results aren't back yet. We typically receive them within {timeframe}. We'll call you as soon as they're available."
+      
+      normal: "Your {test_type} results are normal. Dr. {provider} doesn't need to see you unless you have concerns."
+
+# ============================================================================
+# EPIC INTEGRATION MAPPINGS
+# ============================================================================
+epic_integration:
+  patient_verification:
+    primary_identifiers:
+      - "first_name"
+      - "last_name"
+      - "date_of_birth"
+    
+    secondary_identifiers:
+      - "phone_number"
+      - "medical_record_number"
+      - "social_security_number"
+    
+    search_templates:
+      by_name_dob: "Patient?given={first_name}&family={last_name}&birthdate={dob}"
+      by_phone: "Patient?telecom={phone_number}"
+      by_mrn: "Patient?identifier={mrn}"
+  
+  appointment_integration:
+    status_mapping:
+      booked: "scheduled"
+      cancelled: "cancelled"
+      completed: "finished"
+      no_show: "noshow"
+    
+    appointment_creation:
+      required_fields:
+        - "patient_id"
+        - "practitioner_id"
+        - "start_time"
+        - "end_time"
+        - "appointment_type"
+      
+      optional_fields:
+        - "reason"
+        - "notes"
+        - "location"
+  
+  medication_integration:
+    refill_status_check: "MedicationRequest?patient={patient_id}&status=active"
+    
+    prescription_statuses:
+      active: "Active prescription with {refills_remaining} refills remaining"
+      completed: "Prescription completed - renewal needed"
+      stopped: "Prescription discontinued"
+      on_hold: "Prescription on hold - provider review required"
+
+# ============================================================================
+# WORKFLOW AUTOMATIONS
+# ============================================================================
+workflows:
+  
+  # Enhanced Patient Lookup with EPIC
+  patient_lookup:
+    steps:
+      - action: "capture_patient_info"
+        fields: ["first_name", "last_name", "date_of_birth"]
+      
+      - action: "epic_patient_search"
+        method: "by_name_dob"
+        fallback: "by_phone"
+      
+      - action: "validate_patient_match"
+        confidence_threshold: 0.95
+      
+      - action: "load_patient_context"
+        data_points:
+          - "recent_appointments"
+          - "active_medications"
+          - "known_allergies"
+          - "preferred_provider"
+          - "insurance_info"
+  
+  # Smart Appointment Scheduling
+  smart_scheduling:
+    steps:
+      - action: "identify_appointment_type"
+        use_nlp: true
+        epic_history_context: true
+      
+      - action: "check_provider_availability"
+        consider_patient_preference: true
+        epic_provider_mapping: true
+      
+      - action: "optimize_scheduling"
+        factors:
+          - "patient_location"
+          - "previous_appointment_times"
+          - "provider_specialization"
+      
+      - action: "create_epic_appointment"
+        sync_immediately: true
+  
+  # Intelligent Prescription Management
+  prescription_workflow:
+    steps:
+      - action: "identify_medication"
+        sources:
+          - "patient_description"
+          - "epic_medication_history"
+          - "pharmacy_records"
+      
+      - action: "check_refill_eligibility"
+        epic_prescription_status: true
+        insurance_verification: true
+      
+      - action: "process_refill_request"
+        auto_send_to_pharmacy: true
+        epic_documentation: true
+
+# ============================================================================
+# COMPLIANCE AND SECURITY
+# ============================================================================
+compliance:
+  hipaa:
+    enabled: true
+    audit_logging: true
+    data_encryption: true
+    access_controls: true
+    
+    patient_verification_required:
+      - "prescription_requests"
+      - "test_result_inquiries"
+      - "appointment_modifications"
+      - "medical_information_requests"
+  
+  call_recording:
+    enabled: true
+    retention_period: 2555 # days (7 years)
+    encryption: "AES-256"
+    access_restrictions: ["medical_staff", "compliance_officer"]
+  
+  data_handling:
+    patient_data_retention: 2555 # days
+    conversation_logs: 365 # days
+    system_logs: 90 # days
+    backup_frequency: "daily"
+
+# ============================================================================
+# PERFORMANCE AND MONITORING
+# ============================================================================
+monitoring:
+  metrics:
+    response_time_target: 2.0 # seconds
+    call_resolution_rate: 85 # percent
+    patient_satisfaction_target: 4.5 # out of 5
+    epic_integration_uptime: 99.9 # percent
+  
+  alerts:
+    high_call_volume: 50 # calls per hour
+    long_response_time: 5.0 # seconds
+    epic_connection_failure: true
+    patient_complaint_keywords:
+      - "complaint"
+      - "dissatisfied"
+      - "manager"
+      - "poor service"
+  
+  reporting:
+    daily_summary: true
+    weekly_analytics: true
+    monthly_performance_report: true
+    epic_integration_metrics: true
+
+# ============================================================================
+# TESTING AND VALIDATION
+# ============================================================================
+testing:
+  scenarios:
+    - name: "routine_appointment_booking"
+      description: "Patient calls to schedule annual physical"
+      expected_outcome: "appointment_scheduled"
+      
+    - name: "emergency_triage"
+      description: "Patient reports chest pain"
+      expected_outcome: "911_recommendation"
+      
+    - name: "prescription_refill"
+      description: "Patient needs medication refill"
+      expected_outcome: "refill_processed_or_provider_contacted"
+      
+    - name: "test_results_inquiry"
+      description: "Patient calling about lab results"
+      expected_outcome: "results_status_provided"
+  
+  validation_rules:
+    - "all_patient_interactions_must_be_logged"
+    - "hipaa_compliance_verified_for_each_module"
+    - "epic_integration_data_accuracy_checked"
+    - "emergency_protocols_never_bypassed"

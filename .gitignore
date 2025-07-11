@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+
+# Environment variables
+.env
+.env.*
+
+# VSCode settings
+.vscode/
+
+# MacOS
+.DS_Store
+
+# Pytest
+.pytest_cache/
+
+# Alembic
+alembic/versions/*.pyc
+
+# Logs
+*.log
+
+# Jupyter Notebooks
+.ipynb_checkpoints/ 

@@ -1,0 +1,27 @@
+{
+  "call_id": "b1bdc89b-de64-4f8f-93ae-4285b36f29ca",
+  "clinic_id": 1,
+  "patient_phone": "345678",
+  "start_time": "2025-06-21T21:04:58.482241",
+  "end_time": "2025-06-21T21:13:14.001107",
+  "interactions": [
+    {
+      "timestamp": "2025-06-21T21:04:58.482241",
+      "user_message": "hey",
+      "ai_response": "I apologize, I'm experiencing a technical issue right now. Could you please repeat your request?",
+      "next_action": "continue_conversation",
+      "requires_human": false,
+      "priority": "normal",
+      "metadata": {}
+    },
+    {
+      "timestamp": "2025-06-21T21:13:09.111646",
+      "user_message": "hi",
+      "ai_response": "I apologize, I'm experiencing a technical issue right now. Could you please repeat your request?",
+      "next_action": "continue_conversation",
+      "requires_human": false,
+      "priority": "normal",
+      "metadata": {}
+    }
+  ]
+}
