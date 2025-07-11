@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 API_KEY = os.getenv("ELEVENLABS_API_KEY")
 BASE_URL = "https://api.elevenlabs.io/v1/convai/tools"
-YOUR_DOMAIN = os.getenv("PUBLIC_API_DOMAIN", "https://f1edba4bce1e.ngrok-free.app")
+YOUR_DOMAIN = os.getenv("PUBLIC_API_DOMAIN", "https://clini-v7ur.onrender.com")
 
 if not API_KEY:
     logger.error("ELEVENLABS_API_KEY not found in environment variables.")

@@ -8,12 +8,12 @@ class WebhookGeneratorService:
     Returns ElevenLabs-compatible webhook tool schemas.
     """
     def __init__(self, public_api_domain: Optional[str] = None):
-        self.public_api_domain = public_api_domain or self._get_ngrok_url() or os.getenv("PUBLIC_API_DOMAIN", "https://your-domain.com")
+        self.public_api_domain = public_api_domain or self._get_ngrok_url() or os.getenv("PUBLIC_API_DOMAIN", "https://clini-v7ur.onrender.com")
 
     def _get_ngrok_url(self) -> Optional[str]:
         """Try to get the public ngrok URL if ngrok is running locally, or use the provided one."""
         # Always use the provided ngrok URL if set
-        forced_ngrok_url = os.getenv("FORCED_NGROK_URL", "https://b561215328df.ngrok-free.app ")
+        forced_ngrok_url = os.getenv("FORCED_NGROK_URL", "https://clini-v7ur.onrender.com")
         if forced_ngrok_url:
             return forced_ngrok_url
         try:

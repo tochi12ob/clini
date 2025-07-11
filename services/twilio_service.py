@@ -21,7 +21,7 @@ class TwilioService:
     def __init__(self):
         self.account_sid = os.getenv("TWILIO_ACCOUNT_SID")
         self.auth_token = os.getenv("TWILIO_AUTH_TOKEN")
-        self.webhook_base_url = os.getenv("WEBHOOK_BASE_URL", "https://your-domain.com")
+        self.webhook_base_url = os.getenv("WEBHOOK_BASE_URL", "https://clini-v7ur.onrender.com")
         
         if not self.account_sid or not self.auth_token:
             logger.error("Twilio credentials not found in environment variables")

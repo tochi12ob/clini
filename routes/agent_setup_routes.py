@@ -953,7 +953,7 @@ async def auto_update_tools(
     """
     Generate all webhook configs for the clinic/EHR, update the agent config, and return the webhook tool list.
     """
-    NGROK_URL = os.getenv("FORCED_NGROK_URL", "https://b561215328df.ngrok-free.app ")
+    NGROK_URL = os.getenv("FORCED_NGROK_URL", "https://clini-v7ur.onrender.com")
     from services.webhook_generator_service import WebhookGeneratorService
     service = WebhookGeneratorService(public_api_domain=NGROK_URL)
     epic_creds_dict = epic_creds if epic_creds else None
@@ -1034,7 +1034,7 @@ async def generate_webhook_tools(
     """
     Generate all webhook tools for the clinic/EHR and return the full conversation_config JSON in the required format (matching the user's working sample exactly, with only the fields shown in the sample for each tool, and no extra keys at the top level).
     """
-    NGROK_URL = os.getenv("FORCED_NGROK_URL", "https://b561215328df.ngrok-free.app ")
+    NGROK_URL = os.getenv("FORCED_NGROK_URL", "https://clini-v7ur.onrender.com")
     from services.webhook_generator_service import WebhookGeneratorService
     service = WebhookGeneratorService(public_api_domain=NGROK_URL)
     epic_creds_dict = epic_creds if epic_creds else None
