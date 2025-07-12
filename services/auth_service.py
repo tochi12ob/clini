@@ -171,12 +171,22 @@ class AuthService:
         # This runs in the background and won't block the registration response
         try:
             # Use asyncio to run setup in background
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # If we're in an async context, create a task
-                asyncio.create_task(self._setup_clinic_integrations_async(clinic, db, area_code))
-            else:
-                # If we're in a sync context, run in thread
+            try:
+                loop = asyncio.get_event_loop()
+                if loop and loop.is_running():
+                    # If we're in an async context, create a task
+                    asyncio.create_task(self._setup_clinic_integrations_async(clinic, db, area_code))
+                else:
+                    # If we're in a sync context, run in thread
+                    import threading
+                    thread = threading.Thread(
+                        target=self._setup_clinic_integrations_sync,
+                        args=(clinic, db, area_code),
+                        daemon=True
+                    )
+                    thread.start()
+            except RuntimeError:
+                # No event loop available, run in thread
                 import threading
                 thread = threading.Thread(
                     target=self._setup_clinic_integrations_sync,
