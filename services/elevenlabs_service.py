@@ -18,11 +18,12 @@ class ElevenLabsAgentCreator:
     """Service for creating ElevenLabs conversational AI agents"""
     
     def __init__(self):
-        self.api_key = os.getenv("ELEVENLABS_API_KEY")
+        # Use the new ElevenLabs API key
+        self.api_key = "sk_4c02b8fb972529999df59ace915d45ef23b542255e48102d"
         self.base_url = "https://api.elevenlabs.io/v1"
         
         if not self.api_key:
-            logger.error("ElevenLabs API key not found in environment variables")
+            logger.error("ElevenLabs API key not found")
             raise ValueError("ElevenLabs API key is required")
         
         self.headers = {

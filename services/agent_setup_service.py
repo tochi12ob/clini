@@ -22,11 +22,12 @@ class AgentSetupService:
     """Service for managing ElevenLabs agents and outbound calls"""
     
     def __init__(self):
-        self.elevenlabs_api_key = os.getenv("ELEVENLABS_API_KEY")
+        # Use the new ElevenLabs API key
+        self.elevenlabs_api_key = "sk_4c02b8fb972529999df59ace915d45ef23b542255e48102d"
         self.base_url = "https://api.elevenlabs.io/v1"
         
         if not self.elevenlabs_api_key:
-            logger.error("ElevenLabs API key not found in environment variables")
+            logger.error("ElevenLabs API key not found")
             raise ValueError("ElevenLabs API key is required")
         
         self.headers = {

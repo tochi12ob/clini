@@ -8,12 +8,13 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-API_KEY = os.getenv("ELEVENLABS_API_KEY")
+# Use the new ElevenLabs API key
+API_KEY = "sk_4c02b8fb972529999df59ace915d45ef23b542255e48102d"
 BASE_URL = "https://api.elevenlabs.io/v1/convai/tools"
 YOUR_DOMAIN = os.getenv("PUBLIC_API_DOMAIN", "https://clini-v7ur.onrender.com")
 
 if not API_KEY:
-    logger.error("ELEVENLABS_API_KEY not found in environment variables.")
+    logger.error("ElevenLabs API key not found.")
     exit(1)
 
 headers = {

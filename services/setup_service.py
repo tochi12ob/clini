@@ -23,7 +23,7 @@ class ClinicSetupService:
         self.twilio_service = twilio_service
         self.elevenlabs_service = ElevenLabsAgentCreator()
         # Store ElevenLabs API key and base URL for direct API calls
-        self.elevenlabs_api_key = os.getenv("ELEVENLABS_API_KEY")
+        self.elevenlabs_api_key = "sk_4c02b8fb972529999df59ace915d45ef23b542255e48102d"
         self.elevenlabs_base_url = "https://api.elevenlabs.io"
     
     async def setup_clinic_integrations(self, clinic: Clinic, db: Session, area_code: str = None) -> Dict[str, Any]:
@@ -148,10 +148,10 @@ class ClinicSetupService:
         """
         try:
             if not self.elevenlabs_api_key:
-                logger.error("ElevenLabs API key not found - check ELEVENLABS_API_KEY in .env file")
+                logger.error("ElevenLabs API key not found")
                 return {
                     "success": False,
-                    "error": "ElevenLabs API key not found - check .env file",
+                    "error": "ElevenLabs API key not found",
                     "data": None
                 }
             
