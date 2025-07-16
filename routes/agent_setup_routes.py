@@ -1048,34 +1048,16 @@ async def generate_webhook_tools(
         }
     configs = service.generate_webhook_config(clinic_id, ehr, epic_creds=epic_creds_dict, athena_creds=athena_creds_dict)
 
-    # Format each webhook tool exactly as in the working sample
+    # Output each webhook tool exactly as generated, no dummy_param, no GET, no legacy fields
     tools = []
     for cfg in configs:
         tools.append({
             "name": cfg.get("name", ""),
             "description": cfg.get("description", ""),
-            "response_timeout_secs": 20,
-            "type": "webhook",
-            "api_schema": {
-                "url": cfg.get("api_schema", {}).get("url", ""),
-                "method": "GET",
-                "path_params_schema": {},
-                "query_params_schema": {
-                    "properties": {
-                        "dummy_param": {
-                            "type": "string",
-                            "description": "This is a required placeholder due to API schema constraints. It is not used."
-                        }
-                    },
-                    "required": []
-                },
-                "request_body_schema": None,
-                "request_headers": {},
-                "auth_connection": None
-            },
-            "dynamic_variables": {
-                "dynamic_variable_placeholders": {}
-            }
+            "response_timeout_secs": cfg.get("response_timeout_secs", 20),
+            "type": cfg.get("type", "webhook"),
+            "api_schema": cfg.get("api_schema", {}),
+            "dynamic_variables": cfg.get("dynamic_variables", {"dynamic_variable_placeholders": {}})
         })
 
     # Build the full conversation_config JSON exactly as in the working sample

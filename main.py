@@ -6,7 +6,13 @@ from fastapi.responses import JSONResponse, Response
 from fastapi import Request, Form
 import logging
 from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
 
+# Load environment variables from .env file
+load_dotenv()
+
+# Import database to ensure it's initialized with the correct DATABASE_URL
+import database
 
 # Set up proper logging
 logging.basicConfig(level=logging.INFO)

@@ -1,310 +1,813 @@
-import os
-from typing import List, Dict, Any, Optional
-import requests
+import re
+from typing import Optional, Dict, Any
+from integration.athena_health_client import (
+    check_availability,
+    book_appointment,
+    search_patients,
+    get_patient_insurance,
+    create_appointment,
+    update_patient,
+    cancel_appointment,
+    create_patient
+)
+from datetime import datetime
+
+# Helper functions from integration/webhook_tools.py (copy as needed)
+def normalize_phone_number(phone: str) -> str:
+    if not phone:
+        return ""
+    if any(word in phone.lower() for word in ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "zero"]):
+        number_words = {"zero": "0", "one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9"}
+        phone_digits = ""
+        words = phone.lower().replace("-", " ").split()
+        for word in words:
+            if word in number_words:
+                phone_digits += number_words[word]
+        if len(phone_digits) >= 10:
+            return phone_digits
+    return ''.join(filter(str.isdigit, phone))
+
+def extract_patient_name(name: str):
+    if not name:
+        return None, None
+    parts = name.strip().split()
+    if len(parts) < 2:
+        return parts[0], None
+    return parts[0], ' '.join(parts[1:])
 
 class WebhookGeneratorService:
     """
-    Service to generate webhook tool configurations for Epic, AthenaHealth, or both.
-    Returns ElevenLabs-compatible webhook tool schemas.
+    Service class implementing all webhook business logic for appointments, patients, insurance, info, and more.
+    Logic is adapted from integration/webhook_tools.py endpoint handlers for programmatic use.
     """
-    def __init__(self, public_api_domain: Optional[str] = None):
-        self.public_api_domain = public_api_domain or self._get_ngrok_url() or os.getenv("PUBLIC_API_DOMAIN", "https://clini-v7ur.onrender.com")
+    def __init__(self, public_api_domain=None):
+        self.public_api_domain = public_api_domain or "https://clini-v7ur.onrender.com"
 
-    def _get_ngrok_url(self) -> Optional[str]:
-        """Try to get the public ngrok URL if ngrok is running locally, or use the provided one."""
-        # Always use the provided ngrok URL if set
-        forced_ngrok_url = os.getenv("FORCED_NGROK_URL", "https://clini-v7ur.onrender.com")
-        if forced_ngrok_url:
-            return forced_ngrok_url
-        try:
-            resp = requests.get("http://127.0.0.1:4040/api/tunnels", timeout=1)
-            if resp.status_code == 200:
-                tunnels = resp.json().get("tunnels", [])
-                for tunnel in tunnels:
-                    public_url = tunnel.get("public_url")
-                    if public_url and public_url.startswith("https://"):
-                        return public_url
-                # fallback to http if no https tunnel
-                for tunnel in tunnels:
-                    public_url = tunnel.get("public_url")
-                    if public_url and public_url.startswith("http://"):
-                        return public_url
-        except Exception:
-            pass
-        return None
+    # --- Appointment Logic ---
+    def check_availability(self, request: Any) -> Dict[str, Any]:
+        clinic_id = getattr(request, 'clinic_id', None)
+        provider = getattr(request, 'provider', 'athena')
+        patient_name = getattr(request, 'patient_name', None)
+        patient_phone = getattr(request, 'patient_phone', None)
+        patient_dob = getattr(request, 'date_of_birth', None)
+        # Pre-check patient existence if name provided
+        patient_check_result = None
+        if patient_name:
+            patient_check_result = self.pre_check_patient(request)
+        # Route to appropriate provider (only Athena supported here)
+        start_date = getattr(request, 'date', 'tomorrow')
+        department_id = getattr(request, 'department_id', '1')
+        service_type = getattr(request, 'service_type', None)
+        result = check_availability(
+            department_id=department_id,
+            start_date=start_date,
+            end_date=start_date,
+            limit=5
+        )
+        slots = []
+        for apt in result.get("appointments", [])[:5]:
+            slot_time = apt.get("starttime", "")
+            slot_date = apt.get("date", start_date)
+            provider_name = apt.get("providername", "Available provider")
+            appointment_id = str(apt.get("appointmentid"))
+            slots.append({
+                "time": slot_time,
+                "date": slot_date,
+                "provider": provider_name,
+                "appointment_id": appointment_id,
+                "system": "athena"
+            })
+        available = bool(slots)
+        response = {
+            "success": result.get("success", False),
+            "available": available,
+            "slots": slots,
+            "date_checked": start_date,
+            "provider": provider
+        }
+        if patient_check_result and patient_name:
+            response["patient_status"] = patient_check_result
+        return response
 
-    def generate_webhook_config(self, clinic_id: str, ehr: str, epic_creds: Optional[dict] = None, athena_creds: Optional[dict] = None) -> List[Dict[str, Any]]:
-        """
-        Generate webhook tool config(s) for the specified EHR(s).
-        ehr: 'epic', 'athena', or 'both'
-        epic_creds: dict with keys epic_client_id, epic_client_secret, epic_fhir_base_url, epic_redirect_uri (optional)
-        athena_creds: dict with keys athena_client_id, athena_client_secret, athena_api_base_url, athena_practice_id
-        Returns a list of tool configs (dicts)
-        """
-        configs = []
-        if ehr in ("epic", "both"):
-            if not epic_creds or not all(k in epic_creds for k in ("epic_client_id", "epic_client_secret", "epic_fhir_base_url")):
-                raise ValueError("Epic credentials required for Epic webhook generation.")
-            configs.append(self._epic_config(clinic_id, epic_creds))
-        if ehr in ("athena", "both"):
-            if not athena_creds or not all(k in athena_creds for k in ("athena_client_id", "athena_client_secret", "athena_api_base_url", "athena_practice_id")):
-                raise ValueError("Athena credentials required for Athena webhook generation.")
-            configs.extend(self._athena_function_webhooks(clinic_id, athena_creds))
-        return configs
-
-    def _epic_config(self, clinic_id: str, epic_creds: dict) -> Dict[str, Any]:
-        base_url = epic_creds["epic_fhir_base_url"]
-        redirect_uri = epic_creds.get("epic_redirect_uri", "http://localhost:8000/callback")
-        return {
-            "name": f"epic_{clinic_id}_webhook",
-            "description": f"Webhook for Epic FHIR integration for clinic {clinic_id}",
-            "type": "webhook",
-            "response_timeout_secs": 20,
-            "api_schema": {
-                "url": f"{self.public_api_domain}/api/tools/epic/{clinic_id}/webhook",
-                "method": "POST",
-                "path_params_schema": {},
-                "query_params_schema": {"properties": {}, "required": []},
-                "request_body_schema": {
-                    "type": "object",
-                    "required": ["resource", "action"],
-                    "properties": {
-                        "resource": {"type": "string", "description": "FHIR resource type (e.g., Patient, Appointment)"},
-                        "action": {"type": "string", "description": "Action to perform (e.g., search, book)"},
-                        "parameters": {"type": "object", "description": "Parameters for the FHIR action"}
-                    }
-                },
-                "request_headers": {},
-                "auth_connection": {
-                    "type": "oauth2",
-                    "token_url": f"{base_url}/oauth2/token",
-                    "client_id": epic_creds["epic_client_id"],
-                    "client_secret": epic_creds["epic_client_secret"],
-                    "scope": "system/Patient.read",
-                    "redirect_uri": redirect_uri
+    def book_appointment(self, request: Any) -> Dict[str, Any]:
+        first_name, last_name = extract_patient_name(getattr(request, 'patient_name', ''))
+        patient_phone = getattr(request, 'patient_phone', None)
+        appointment_id = getattr(request, 'appointment_id', None)
+        date = getattr(request, 'date', None)
+        time = getattr(request, 'time', None)
+        service_type = getattr(request, 'service_type', None)
+        # Search for patient
+        if first_name and last_name:
+            normalized_phone = normalize_phone_number(patient_phone)
+            search_result = search_patients(first_name=first_name, last_name=last_name, phone=normalized_phone)
+            if not (search_result.get("success") and search_result.get("patients")):
+                search_result = search_patients(first_name=first_name, last_name=last_name)
+            if search_result.get("success") and search_result.get("patients"):
+                patient_id = search_result["patients"][0].get("patientid")
+            else:
+                return {
+                    "success": False,
+                    "message": "I couldn't find your patient record. Would you like me to register you as a new patient?",
+                    "action_needed": "new_patient_registration",
+                    "suggestion": "I can help you register as a new patient if you'd like to proceed."
                 }
+        else:
+            return {
+                "success": False,
+                "message": "I need your full name to book the appointment",
+                "missing_info": ["patient_name"]
+            }
+        # Book the appointment
+        if appointment_id:
+            appointment_type_id = "2"
+            reason = service_type or "Office Visit"
+            result = book_appointment(
+                appointment_id=appointment_id,
+                patient_id=patient_id,
+                appointment_type_id=appointment_type_id,
+                reason=reason
+            )
+        elif date and time:
+            return {
+                "success": False,
+                "message": "I need to check availability first to get the appointment slot ID",
+                "action_needed": "check_availability",
+                "missing_info": ["appointment_id"],
+                "suggestion": "Please let me check the availability again to get the correct appointment slot"
+            }
+        else:
+            return {
+                "success": False,
+                "message": "I need your appointment date and time to book the appointment",
+                "missing_info": ["date", "time"]
+            }
+        if result.get("success"):
+            return {
+                "success": True,
+                "message": f"Perfect! Your {service_type or 'appointment'} appointment has been booked successfully!",
+                "confirmation_number": appointment_id,
+                "details": f"{service_type or 'Appointment'} on {date} at {time}",
+                "appointment_type": "Office Visit",
+                "provider": "athena",
+                "next_steps": "You should receive a confirmation call or email. Please arrive 15 minutes early."
+            }
+        else:
+            error_message = result.get("error", "The time slot may no longer be available")
+            return {
+                "success": False,
+                "message": f"I'm sorry, I couldn't book that appointment. {error_message}",
+                "reason": error_message,
+                "provider": "athena",
+                "suggestion": "Would you like me to check for other available times?"
+            }
+
+    def pre_check_patient(self, request: Any) -> Dict[str, Any]:
+        patient_name = getattr(request, 'patient_name', None)
+        patient_phone = getattr(request, 'patient_phone', None)
+        if not patient_name:
+            return {
+                "exists": False,
+                "message": "I'll need your full name to check our records.",
+                "action_needed": "get_patient_name"
+            }
+        first_name, last_name = extract_patient_name(patient_name)
+        if not first_name or not last_name:
+            return {
+                "exists": False,
+                "message": f"I need your full name to check our records. I have '{patient_name}' - could you provide your first and last name?",
+                "action_needed": "get_full_name"
+            }
+        normalized_phone = normalize_phone_number(patient_phone) if patient_phone else None
+        search_result = None
+        if normalized_phone and len(normalized_phone) >= 10:
+            search_result = search_patients(first_name=first_name, last_name=last_name, phone=normalized_phone)
+        if not (search_result and search_result.get("success") and search_result.get("patients")):
+            search_result = search_patients(first_name=first_name, last_name=last_name)
+        if search_result.get("success") and search_result.get("patients"):
+            patient = search_result["patients"][0]
+            patient_id = patient.get("patientid")
+            return {
+                "exists": True,
+                "patient_id": patient_id,
+                "patient_info": patient,
+                "message": "I found your record in our system. Let me check what appointments are available for you.",
+                "action_needed": "proceed_with_scheduling",
+                "search_method": "exact_match"
+            }
+        else:
+            return {
+                "exists": False,
+                "message": "I couldn't find your record. Would you like to register as a new patient?",
+                "action_needed": "register_new_patient"
+            }
+
+    def register_patient(self, request: Any) -> Dict[str, Any]:
+        patient_name = getattr(request, 'patient_name', None)
+        patient_phone = getattr(request, 'patient_phone', None)
+        date_of_birth = getattr(request, 'date_of_birth', None)
+        email = getattr(request, 'email', None)
+        address = getattr(request, 'address', None)
+        city = getattr(request, 'city', None)
+        state = getattr(request, 'state', None)
+        zip_code = getattr(request, 'zip_code', None)
+        emergency_contact_name = getattr(request, 'emergency_contact_name', None)
+        emergency_contact_phone = getattr(request, 'emergency_contact_phone', None)
+        department_id = getattr(request, 'department_id', "1")  # Extract department_id, default to '1'
+        # Split name
+        first_name, last_name = extract_patient_name(patient_name)
+        # Normalize phone
+        normalized_phone = normalize_phone_number(patient_phone)
+        # Reformat date_of_birth to mm/dd/yyyy if needed
+        if date_of_birth and "-" in date_of_birth:
+            try:
+                parts = date_of_birth.split("-")
+                if len(parts) == 3:
+                    date_of_birth = f"{parts[1]}/{parts[2]}/{parts[0]}"
+            except Exception:
+                pass
+        # Validate phone number
+        if not normalized_phone or len(normalized_phone) < 10:
+            return {
+                "success": False,
+                "message": "That phone number doesn't look right. Could you repeat it, digit by digit?",
+                "validation_error": "phone",
+                "needs_clarification": True,
+                "current_data": {
+                    "name": patient_name,
+                    "phone_attempt": patient_phone
+                }
+            }
+        # Validate email (simple check)
+        if email and ("@" not in email or "." not in email):
+            return {
+                "success": False,
+                "message": "That email address doesn't sound quite right. Could you spell it out for me?",
+                "validation_error": "email",
+                "needs_clarification": True,
+                "current_email": email
+            }
+        # Check required fields
+        if not first_name or not last_name or not normalized_phone or not date_of_birth:
+            return {
+                "success": False,
+                "message": "Missing required patient information.",
+                "validation_error": "required_fields"
+            }
+        # Actually create the patient in the system
+        try:
+            result = create_patient(
+                first_name=first_name,
+                last_name=last_name,
+                date_of_birth=date_of_birth,
+                phone=normalized_phone,
+                email=email,
+                address=address,
+                city=city,
+                state=state,
+                zip_code=zip_code,
+                emergency_contact_name=emergency_contact_name,
+                emergency_contact_phone=emergency_contact_phone,
+                department_id=department_id  # Pass department_id to create_patient
+            )
+            # Handle result type (dict expected)
+            if isinstance(result, dict):
+                if result.get("success") and result.get("patient_id"):
+                    return {
+                        "success": True,
+                        "patient_id": result["patient_id"],
+                        "message": f"Patient {patient_name} registered successfully."
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "message": result.get("message", "Failed to register patient."),
+                        "error": result.get("error", "Unknown error")
+                    }
+            elif isinstance(result, list):
+                return {
+                    "success": False,
+                    "message": f"Unexpected list response from patient registration. See 'details' for more info.",
+                    "error": "Patient registration returned a list instead of a dict.",
+                    "details": result
+                }
+            else:
+                # If result is a dict with error details from Athena, surface them
+                if isinstance(result, dict) and result.get("error") == "Athena API returned a list instead of a dict." and "details" in result:
+                    return {
+                        "success": False,
+                        "message": result.get("message", "Athena API returned a list instead of a dict."),
+                        "error": result.get("error"),
+                        "details": result.get("details")
+                    }
+                return {
+                    "success": False,
+                    "message": "Unexpected response from patient registration.",
+                    "error": str(result)
+                }
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"An error occurred while registering the patient: {str(e)}",
+                "error": str(e)
+            }
+
+    def verify_patient(self, request: Any) -> Dict[str, Any]:
+        patient_name = getattr(request, 'patient_name', None)
+        patient_phone = getattr(request, 'patient_phone', None)
+        date_of_birth = getattr(request, 'date_of_birth', None)
+        first_name, last_name = extract_patient_name(patient_name)
+        normalized_phone = normalize_phone_number(patient_phone)
+        result = search_patients(
+            first_name=first_name,
+            last_name=last_name,
+            phone=normalized_phone,
+            date_of_birth=date_of_birth,
+            limit=1
+        )
+        if result.get("success") and result.get("patients"):
+            patient = result["patients"][0]
+            return {
+                "verified": True,
+                "message": f"I found your record, {first_name}",
+                "patient_id": patient.get("patientid"),
+                "has_insurance_on_file": True,  # Simplified
+                "last_visit": patient.get("lastappointmentdate"),
+                "provider": "athena"
+            }
+        else:
+            return {
+                "verified": False,
+                "message": "I couldn't find your patient record",
+                "suggestion": "You may need to register as a new patient",
+                "provider": "athena"
+            }
+
+    def verify_insurance(self, request: Any) -> Dict[str, Any]:
+        patient_name = getattr(request, 'patient_name', None)
+        insurance_provider = getattr(request, 'insurance_provider', None)
+        first_name, last_name = extract_patient_name(patient_name)
+        search_result = search_patients(first_name=first_name, last_name=last_name)
+        if search_result.get("success") and search_result.get("patients"):
+            patient_id = search_result["patients"][0].get("patientid")
+            insurance_result = get_patient_insurance(patient_id)
+            if insurance_result.get("success"):
+                insurances = insurance_result.get("insurances", [])
+                if insurance_provider:
+                    for ins in insurances:
+                        insurance_name = ins.get("insurancename", "").lower()
+                        if insurance_provider.lower() in insurance_name or insurance_name in insurance_provider.lower():
+                            return {
+                                "success": True,
+                                "message": f"Yes, I see you have {ins.get('insurancename')} on file. You should be all set for your appointment!",
+                                "insurance_verified": True,
+                                "copay_info": ins.get("copay"),
+                                "coverage_active": True,
+                                "insurance_details": ins
+                            }
+                    return {
+                        "success": True,
+                        "message": f"I see you have {', '.join([ins.get('insurancename', '') for ins in insurances])} on file, but you mentioned {insurance_provider}. Have you changed insurance recently?",
+                        "insurance_mismatch": True,
+                        "current_insurance": [ins.get('insurancename') for ins in insurances],
+                        "mentioned_insurance": insurance_provider,
+                        "action_needed": "update_insurance"
+                    }
+                else:
+                    return {
+                        "success": True,
+                        "message": "I see you have insurance on file.",
+                        "insurance_verified": True,
+                        "current_insurance": [ins.get('insurancename') for ins in insurances]
+                    }
+            else:
+                return {
+                    "success": False,
+                    "message": "I'm having trouble accessing your insurance information right now. Let me transfer you to someone who can help verify your coverage.",
+                    "error": insurance_result.get("error", "Unknown error")
+                }
+        else:
+            return {
+                "success": False,
+                "message": "I couldn't find your patient record to verify insurance.",
+                "action_needed": "register_new_patient"
+            }
+
+    def get_practice_info(self, request: Any) -> Dict[str, Any]:
+        info_type = getattr(request, 'info_type', 'general')
+        specific_service = getattr(request, 'specific_service', None)
+        clinic_info = {
+            "name": "Our Medical Practice",
+            "phone": "(555) 123-4567",
+            "address": "123 Medical Center Dr, Suite 100",
+            "hours": {
+                "monday": "8:00 AM - 5:00 PM",
+                "tuesday": "8:00 AM - 5:00 PM",
+                "wednesday": "8:00 AM - 5:00 PM",
+                "thursday": "8:00 AM - 5:00 PM",
+                "friday": "8:00 AM - 5:00 PM",
+                "saturday": "9:00 AM - 2:00 PM",
+                "sunday": "Closed"
             },
-            "dynamic_variables": {"dynamic_variable_placeholders": {}}
+            "services": ["General Check-ups", "Preventive Care", "Chronic Disease Management", "Vaccinations", "Lab Work"],
+            "insurance_accepted": ["Blue Cross Blue Shield", "Aetna", "Cigna", "UnitedHealth", "Medicare", "Medicaid"]
+        }
+        if info_type == "hours":
+            today = datetime.now().strftime("%A").lower()
+            return {
+                "success": True,
+                "message": f"Today we're open {clinic_info['hours'][today]}. Would you like our full weekly schedule?",
+                "hours_today": clinic_info['hours'][today],
+                "full_schedule": "\n".join([f"{day.title()}: {hours}" for day, hours in clinic_info['hours'].items()]),
+                "current_day": today.title()
+            }
+        elif info_type == "location":
+            return {
+                "success": True,
+                "message": f"We're located at {clinic_info['address']}. Our phone number is {clinic_info['phone']}. Would you like directions?",
+                "address": clinic_info['address'],
+                "phone": clinic_info['phone'],
+                "parking_info": "Free parking is available in our lot",
+                "directions_available": True
+            }
+        elif info_type == "services":
+            if specific_service:
+                available = specific_service in clinic_info['services']
+                return {
+                    "success": True,
+                    "message": f"Yes, we do offer {specific_service}! Would you like to schedule an appointment for this service?" if available else f"I'm sorry, we don't offer {specific_service}.",
+                    "service_available": available,
+                    "requested_service": specific_service,
+                    "booking_available": available
+                }
+            return {
+                "success": True,
+                "message": f"We offer: {', '.join(clinic_info['services'])}",
+                "services": clinic_info['services']
+            }
+        else:
+            return {
+                "success": True,
+                "message": f"Welcome to {clinic_info['name']}! How can I help you today?",
+                "info": clinic_info
+            }
+
+    def handle_emergency(self, request: Any) -> Dict[str, Any]:
+        urgency_level = getattr(request, 'urgency_level', 'unknown')
+        symptoms = getattr(request, 'symptoms', '')
+        patient_name = getattr(request, 'patient_name', 'caller')
+        critical_keywords = [
+            "chest pain", "can't breathe", "unconscious", "stroke",
+            "severe bleeding", "heart attack", "overdose", "choking",
+            "suicide", "not breathing", "cardiac arrest", "anaphylaxis"
+        ]
+        symptoms_lower = symptoms.lower()
+        if any(keyword in symptoms_lower for keyword in critical_keywords):
+            return {
+                "success": True,
+                "message": "This sounds like a medical emergency. I'm going to help you contact 911 immediately. Please stay on the line and don't hang up.",
+                "action": "emergency_911",
+                "transfer_to": "911",
+                "priority": "critical",
+                "symptoms_reported": symptoms,
+                "emergency_protocol": True
+            }
+        elif urgency_level in ["high", "urgent", "critical"]:
+            return {
+                "success": True,
+                "message": f"I understand this is urgent, {patient_name}. Let me get you to our clinical staff right away. Please hold while I transfer you.",
+                "action": "urgent_transfer",
+                "transfer_to": "clinical_staff",
+                "priority": "urgent",
+                "wait_time_estimate": "2-3 minutes"
+            }
+        else:
+            return {
+                "success": True,
+                "message": "I understand this is concerning. Let me see if we have any same-day appointments available or if there's another way we can help you today.",
+                "action": "schedule_urgent",
+                "priority": "same_day",
+                "offer_nurse_line": True
+            }
+
+    def process_spelled_name(self, request: Any) -> Dict[str, Any]:
+        spelled_name = getattr(request, 'spelled_name', '').strip()
+        context = getattr(request, 'context', 'search')
+        original_name = getattr(request, 'original_name', '')
+        if not spelled_name:
+            return {
+                "success": False,
+                "message": "I didn't catch the spelling. Could you spell your name again, letter by letter?",
+                "action_needed": "repeat_spelling"
+            }
+        processed_name = spelled_name.replace("Last name", "").replace("last name", "").replace("First name", "").replace("first name", "")
+        if "-" in processed_name:
+            words = processed_name.split()
+            processed_words = []
+            for word in words:
+                if "-" in word:
+                    clean_word = word.replace("-", "").replace(" ", "")
+                    processed_words.append(clean_word.title())
+                else:
+                    processed_words.append(word.title())
+            processed_name = " ".join(processed_words)
+        else:
+            processed_name = processed_name.title()
+        processed_name = " ".join(processed_name.split())
+        if context == "search":
+            first_name, last_name = extract_patient_name(processed_name)
+            if first_name and last_name:
+                search_result = search_patients(first_name=first_name, last_name=last_name)
+                if search_result.get("success") and search_result.get("patients"):
+                    patient = search_result["patients"][0]
+                    return {
+                        "success": True,
+                        "patient_found": True,
+                        "patient_id": patient.get("patientid"),
+                        "patient_info": patient,
+                        "processed_name": processed_name,
+                        "message": f"Great! I have {processed_name} - thank you for spelling that out, {first_name}! I found your record! Let me check what appointments are available for you.",
+                        "action_needed": "proceed_with_scheduling"
+                    }
+                else:
+                    return {
+                        "success": True,
+                        "patient_found": False,
+                        "processed_name": processed_name,
+                        "message": f"I don't see you in our system yet. I'll get you registered first, then we can schedule your appointment.",
+                        "action_needed": "proceed_with_registration",
+                        "next_step": "get_phone_number"
+                    }
+            else:
+                return {
+                    "success": False,
+                    "processed_name": processed_name,
+                    "message": "I need your full name to search for your record.",
+                    "action_needed": "get_full_name"
+                }
+        else:
+            return {
+                "success": True,
+                "processed_name": processed_name,
+                "message": f"Thank you for spelling your name, {processed_name}."
+            }
+
+    def clarify_intent(self, request: Any) -> Dict[str, Any]:
+        unclear_input = getattr(request, 'unclear_input', '')
+        context = getattr(request, 'conversation_context', None)
+        previous_attempts = getattr(request, 'previous_attempts', 0)
+        patient_name = getattr(request, 'patient_name', None)
+        if previous_attempts >= 2:
+            return {
+                "success": True,
+                "message": "I want to make sure I help you properly. Let me connect you with someone from our front desk who can assist you.",
+                "action": "escalate_to_human",
+                "reason": "multiple_clarification_attempts",
+                "transfer_to": "front_desk"
+            }
+        input_lower = unclear_input.lower()
+        detected_keywords = []
+        appointment_keywords = ["appointment", "schedule", "book", "cancel", "reschedule", "change", "visit", "see doctor"]
+        if any(keyword in input_lower for keyword in appointment_keywords):
+            detected_keywords.append("appointment")
+        info_keywords = ["hours", "location", "address", "phone", "services", "insurance", "cost", "price"]
+        if any(keyword in input_lower for keyword in info_keywords):
+            detected_keywords.append("information")
+        urgent_keywords = ["urgent", "emergency", "pain", "hurt", "sick", "help", "asap"]
+        if any(keyword in input_lower for keyword in urgent_keywords):
+            detected_keywords.append("urgent")
+        return {
+            "success": True,
+            "message": f"For medical questions and requests{', ' + patient_name if patient_name else ''}, I can help you with:",
+            "clarification_options": [
+                "Scheduling an appointment with your provider",
+                "Getting transferred to a nurse",
+                "General questions about our services"
+            ],
+            "note": "For specific medical advice, you'll need to speak with a healthcare provider",
+            "context": "medical_inquiry"
         }
 
-    def _athena_function_webhooks(self, clinic_id: str, athena_creds: dict) -> List[Dict[str, Any]]:
-        base_url = athena_creds["athena_api_base_url"]
-        practice_id = athena_creds["athena_practice_id"]
-        auth_connection = {
-            "type": "oauth2",
-            "token_url": f"{base_url}/oauth2/v1/token",
-            "client_id": athena_creds["athena_client_id"],
-            "client_secret": athena_creds["athena_client_secret"],
-            "scope": "athena/service/Athenanet.MDP.*",
-            "practice_id": practice_id
+    def conversation_recovery(self, request: Any) -> Dict[str, Any]:
+        error_type = getattr(request, 'error_type', 'unclear_intent')
+        last_input = getattr(request, 'last_user_input', '')
+        stage = getattr(request, 'conversation_stage', 'unknown')
+        retry_count = getattr(request, 'retry_count', 0)
+        if retry_count >= 3:
+            return {
+                "success": True,
+                "message": "I want to make sure you get the help you need. Let me connect you with someone from our team who can assist you directly.",
+                "action": "escalate_to_human",
+                "reason": "multiple_recovery_attempts",
+                "priority": "normal"
+            }
+        return {
+            "success": True,
+            "message": "Welcome! I'm here to help you with appointments and practice information. What brings you in today?",
+            "action": "gentle_restart",
+            "stage": stage,
+            "open_ended_prompt": True
         }
-        # List of Athena functions and their parameter schemas
-        athena_functions = [
+
+    def check_office_status(self, request: Any) -> Dict[str, Any]:
+        check_time = getattr(request, 'check_time', None)
+        clinic_info = {
+            "name": "Our Medical Practice",
+            "phone": "(555) 123-4567",
+            "emergency_phone": "(555) 123-4568",
+            "hours": {
+                "monday": "8:00 AM - 5:00 PM",
+                "tuesday": "8:00 AM - 5:00 PM",
+                "wednesday": "8:00 AM - 5:00 PM",
+                "thursday": "8:00 AM - 5:00 PM",
+                "friday": "8:00 AM - 5:00 PM",
+                "saturday": "9:00 AM - 2:00 PM",
+                "sunday": "Closed"
+            }
+        }
+        current_time = None
+        if check_time:
+            try:
+                current_time = datetime.strptime(check_time, "%Y-%m-%d %H:%M")
+            except ValueError:
+                try:
+                    current_time = datetime.strptime(check_time, "%H:%M")
+                    today = datetime.now().date()
+                    current_time = datetime.combine(today, current_time.time())
+                except ValueError:
+                    pass
+        if not current_time:
+            current_time = datetime.now()
+        current_day = current_time.strftime("%A").lower()
+        hours_today = clinic_info["hours"].get(current_day, "Closed")
+        is_open = False
+        if hours_today != "Closed":
+            open_time, close_time = hours_today.split("-")
+            open_time = datetime.strptime(open_time.strip(), "%I:%M %p").time()
+            close_time = datetime.strptime(close_time.strip(), "%I:%M %p").time()
+            now_time = current_time.time()
+            is_open = open_time <= now_time <= close_time
+        return {
+            "success": True,
+            "message": f"Yes, Our Medical Practice is currently open! We close at {hours_today.split('-')[1].strip()}. How can I help you today?" if is_open else f"Sorry, we're currently closed. Our hours today are {hours_today}.",
+            "office_open": is_open,
+            "current_time": current_time.strftime("%I:%M %p"),
+            "hours_today": hours_today,
+            "closing_info": f"We close at {hours_today.split('-')[1].strip()}" if is_open else None,
+            "can_schedule": is_open,
+            "can_take_calls": is_open,
+            "clinic_name": clinic_info["name"],
+            "phone": clinic_info["phone"]
+        }
+
+    def check_holiday_hours(self, request: Any) -> Dict[str, Any]:
+        date_to_check = getattr(request, 'date', None)
+        clinic_info = {
+            "holiday_hours": {},
+            "special_hours": {}
+        }
+        holiday_hours = clinic_info.get("holiday_hours", {})
+        special_hours = clinic_info.get("special_hours", {})
+        if date_to_check:
+            special_schedule = holiday_hours.get(date_to_check) or special_hours.get(date_to_check)
+            if special_schedule:
+                return {
+                    "success": True,
+                    "message": f"We have special hours on {date_to_check}: {special_schedule}",
+                    "has_special_hours": True,
+                    "date": date_to_check,
+                    "special_hours": special_schedule,
+                    "is_holiday": True
+                }
+            else:
+                return {
+                    "success": True,
+                    "message": f"We're following our regular schedule on {date_to_check}. Would you like me to tell you our regular hours?",
+                    "has_special_hours": False,
+                    "date": date_to_check,
+                    "follows_regular_schedule": True
+                }
+        else:
+            return {
+                "success": False,
+                "message": "Please provide a date to check for holiday hours."
+            }
+
+    def generate_webhook_config(self, clinic_id, ehr, epic_creds=None, athena_creds=None):
+        NGROK_URL = getattr(self, 'public_api_domain', None) or "https://clini-v7ur.onrender.com"
+        base_url = f"{NGROK_URL}/api/tools"
+        # Only output the four specified webhooks, with exact schemas
+        return [
             {
-                "func": "get_access_token",
-                "description": "Obtain an OAuth2 access token from AthenaHealth.",
-                "params": {}
-            },
-            {
-                "func": "check_availability",
-                "description": "Check open appointment slots.",
-                "params": {
-                    "department_id": {"type": "string"},
-                    "start_date": {"type": "string"},
-                    "end_date": {"type": "string"},
-                    "reason_id": {"type": "integer", "default": -1},
-                    "provider_id": {"type": "string", "default": None},
-                    "limit": {"type": "integer", "default": 10}
-                },
-                "required": ["department_id", "start_date", "end_date"]
-            },
-            {
-                "func": "get_patient_details",
-                "description": "Get detailed information about a patient.",
-                "params": {
-                    "patient_id": {"type": "string"}
-                },
-                "required": ["patient_id"]
-            },
-            {
-                "func": "get_patient_insurance",
-                "description": "Get insurance information for a patient.",
-                "params": {
-                    "patient_id": {"type": "string"}
-                },
-                "required": ["patient_id"]
-            },
-            {
-                "func": "get_patient_appointment_reasons",
-                "description": "Get available appointment reasons for booking.",
-                "params": {
-                    "department_id": {"type": "string", "default": None},
-                    "provider_id": {"type": "string", "default": None},
-                    "patient_type": {"type": "string", "default": None}
-                },
-                "required": []
-            },
-            {
-                "func": "get_appointment_types",
-                "description": "Get available appointment types for a department.",
-                "params": {
-                    "department_id": {"type": "string"}
-                },
-                "required": ["department_id"]
-            },
-            {
-                "func": "book_appointment",
-                "description": "Book an appointment for a patient.",
-                "params": {
-                    "appointment_id": {"type": "string"},
-                    "patient_id": {"type": "string"},
-                    "reason": {"type": "string", "default": None},
-                    "insurance_id": {"type": "string", "default": None},
-                    "appointment_type_id": {"type": "string", "default": None},
-                    "reason_id": {"type": "integer", "default": None}
-                },
-                "required": ["appointment_id", "patient_id"]
-            },
-            {
-                "func": "create_appointment",
-                "description": "Create a new appointment.",
-                "params": {
-                    "patient_id": {"type": "string"},
-                    "department_id": {"type": "string"},
-                    "appointment_date": {"type": "string"},
-                    "appointment_time": {"type": "string", "default": None},
-                    "appointment_type_id": {"type": "string", "default": None},
-                    "provider_id": {"type": "string", "default": None},
-                    "reason": {"type": "string", "default": None}
-                },
-                "required": ["patient_id", "department_id", "appointment_date"]
-            },
-            {
-                "func": "get_all_providers",
-                "description": "Get all providers in the practice.",
-                "params": {
-                    "department_id": {"type": "string"},
-                    "limit": {"type": "integer"}
-                },
-                "required": []
-            },
-            {
-                "func": "get_provider_details",
-                "description": "Get detailed information about a specific provider.",
-                "params": {
-                    "provider_id": {"type": "string"}
-                },
-                "required": ["provider_id"]
-            },
-            {
-                "func": "search_patients",
-                "description": "Search for patients by various criteria.",
-                "params": {
-                    "first_name": {"type": "string"},
-                    "last_name": {"type": "string"},
-                    "date_of_birth": {"type": "string"},
-                    "phone": {"type": "string"},
-                    "limit": {"type": "integer"}
-                },
-                "required": []
-            },
-            {
-                "func": "update_patient",
-                "description": "Update patient information.",
-                "params": {
-                    "patient_id": {"type": "string"},
-                    "first_name": {"type": "string"},
-                    "last_name": {"type": "string"},
-                    "phone": {"type": "string"},
-                    "email": {"type": "string"},
-                    "address": {"type": "string"},
-                    "city": {"type": "string"},
-                    "state": {"type": "string"},
-                    "zip_code": {"type": "string"},
-                    "emergency_contact_name": {"type": "string"},
-                    "emergency_contact_phone": {"type": "string"}
-                },
-                "required": ["patient_id"]
-            },
-            {
-                "func": "cancel_appointment",
-                "description": "Cancel an appointment.",
-                "params": {
-                    "appointment_id": {"type": "string"},
-                    "cancel_reason": {"type": "string"},
-                    "cancel_note": {"type": "string"}
-                },
-                "required": ["appointment_id"]
-            },
-            {
-                "func": "get_booked_appointments",
-                "description": "Get all booked appointments.",
-                "params": {
-                    "department_id": {"type": "string"},
-                    "provider_id": {"type": "string"},
-                    "start_date": {"type": "string"},
-                    "end_date": {"type": "string"},
-                    "limit": {"type": "integer"}
-                },
-                "required": []
-            },
-            {
-                "func": "get_patient_appointments",
-                "description": "Get all appointments for a specific patient.",
-                "params": {
-                    "patient_id": {"type": "string"},
-                    "start_date": {"type": "string"},
-                    "end_date": {"type": "string"}
-                },
-                "required": ["patient_id"]
-            },
-            {
-                "func": "create_patient",
-                "description": "Create a new patient in AthenaHealth.",
-                "params": {
-                    "first_name": {"type": "string"},
-                    "last_name": {"type": "string"},
-                    "phone": {"type": "string"},
-                    "date_of_birth": {"type": "string"},
-                    "department_id": {"type": "string"},
-                    "email": {"type": "string"},
-                    "address": {"type": "string"},
-                    "city": {"type": "string"},
-                    "state": {"type": "string"},
-                    "zip_code": {"type": "string"},
-                    "emergency_contact_name": {"type": "string"},
-                    "emergency_contact_phone": {"type": "string"}
-                },
-                "required": ["first_name", "last_name", "phone", "date_of_birth", "department_id"]
-            },
-            # Add more as needed for full coverage
-        ]
-        webhooks = []
-        for fn in athena_functions:
-            fn_name = fn["func"]
-            url = f"{self.public_api_domain}/api/tools/athena/{clinic_id}/{fn_name}"
-            params = fn.get("params", {})
-            required = fn.get("required", list(params.keys()))
-            properties = {k: {"type": v["type"]} for k, v in params.items()}
-            webhook = {
-                "name": f"athena_{clinic_id}_{fn_name}",
-                "description": fn["description"],
+                "name": "search-patients",
+                "description": "Getting more information about a patient using their details ",
                 "type": "webhook",
-                "response_timeout_secs": 20,
                 "api_schema": {
-                    "url": url,
+                    "url": f"{base_url}/search-patients",
                     "method": "POST",
-                    "path_params_schema": {},
-                    "query_params_schema": {"properties": {}, "required": []},
+                    "path_params_schema": [],
+                    "query_params_schema": [],
                     "request_body_schema": {
+                        "id": "body",
                         "type": "object",
-                        "required": required,
-                        "properties": properties
+                        "description": "Details to use to make requests to this webhook",
+                        "properties": [
+                            {"id": "practice_id", "type": "string", "value_type": "llm_prompt", "description": "The practice ID ", "dynamic_variable": "", "constant_value": "", "required": True},
+                            {"id": "phone_number", "type": "string", "value_type": "llm_prompt", "description": "The phone number of the patient ", "dynamic_variable": "", "constant_value": "", "required": True},
+                            {"id": "date_of_birth", "type": "string", "value_type": "llm_prompt", "description": "The date of birth of the patient ", "dynamic_variable": "", "constant_value": "", "required": True},
+                            {"id": "first_name", "type": "string", "value_type": "llm_prompt", "description": "The first name of the patient ", "dynamic_variable": "", "constant_value": "", "required": False},
+                            {"id": "last_name", "type": "string", "value_type": "llm_prompt", "description": "The last name of the patient ", "dynamic_variable": "", "constant_value": "", "required": True}
+                        ],
+                        "required": False,
+                        "value_type": "llm_prompt"
                     },
-                    "request_headers": {},
-                    "auth_connection": auth_connection
+                    "request_headers": [],
+                    "auth_connection": None
                 },
+                "response_timeout_secs": 20,
+                "dynamic_variables": {"dynamic_variable_placeholders": {}}
+            },
+            {
+                "name": "create_appointment_slot",
+                "description": "To create an appointment slot for a patient ",
+                "type": "webhook",
+                "api_schema": {
+                    "url": f"{base_url}/create-appointment-slot",
+                    "method": "POST",
+                    "path_params_schema": [],
+                    "query_params_schema": [],
+                    "request_body_schema": {
+                        "id": "body",
+                        "type": "object",
+                        "description": "The details to ask from the patient ",
+                        "properties": [
+                            {"id": "practice_id", "type": "string", "value_type": "llm_prompt", "description": "The practice ID of the clinic", "dynamic_variable": "", "constant_value": "", "required": True},
+                            {"id": "start_time", "type": "string", "value_type": "llm_prompt", "description": "The start time of the appointment ", "dynamic_variable": "", "constant_value": "", "required": True},
+                            {"id": "provider_id", "type": "string", "value_type": "llm_prompt", "description": "The ID of the provider ", "dynamic_variable": "", "constant_value": "", "required": True},
+                            {"id": "appointment_type_id", "type": "string", "value_type": "llm_prompt", "description": "The appopintment type id ", "dynamic_variable": "", "constant_value": "", "required": True},
+                            {"id": "appointment_date", "type": "string", "value_type": "llm_prompt", "description": "The appointment ", "dynamic_variable": "", "constant_value": "", "required": True},
+                            {"id": "department_id", "type": "string", "value_type": "llm_prompt", "description": "the department id ", "dynamic_variable": "", "constant_value": "", "required": False}
+                        ],
+                        "required": False,
+                        "value_type": "llm_prompt"
+                    },
+                    "request_headers": [],
+                    "auth_connection": None
+                },
+                "response_timeout_secs": 20,
+                "dynamic_variables": {"dynamic_variable_placeholders": {}}
+            },
+            {
+                "name": "get_patient_details",
+                "description": "Get detailed patient information by patient_id.",
+                "type": "webhook",
+                "api_schema": {
+                    "url": f"{base_url}/get-patient-details",
+                    "method": "POST",
+                    "path_params_schema": [],
+                    "query_params_schema": [],
+                    "request_body_schema": {
+                        "id": "body",
+                        "type": "object",
+                        "description": "Collect the id of the patient ",
+                        "properties": [
+                            {"id": "patient_id", "type": "string", "value_type": "llm_prompt", "description": "The patient ID ", "dynamic_variable": "", "constant_value": "", "required": False}
+                        ],
+                        "required": False,
+                        "value_type": "llm_prompt"
+                    },
+                    "request_headers": [],
+                    "auth_connection": None
+                },
+                "response_timeout_secs": 20,
+                "dynamic_variables": {"dynamic_variable_placeholders": {}}
+            },
+            {
+                "name": "register_patient",
+                "description": "Register a new patient ",
+                "type": "webhook",
+                "api_schema": {
+                    "url": f"{base_url}/register-patient",
+                    "method": "POST",
+                    "path_params_schema": [],
+                    "query_params_schema": [],
+                    "request_body_schema": {
+                        "id": "body",
+                        "type": "object",
+                        "description": "Collect patient name and phone number ",
+                        "properties": [
+                            {"id": "patient_phone", "type": "string", "value_type": "llm_prompt", "description": "the phone number of the patient ", "dynamic_variable": "", "constant_value": "", "required": True},
+                            {"id": "patient_name", "type": "string", "value_type": "llm_prompt", "description": "the patients full name ", "dynamic_variable": "", "constant_value": "", "required": True},
+                            {"id": "email", "type": "string", "value_type": "llm_prompt", "description": "The email of the patient ", "dynamic_variable": "", "constant_value": "", "required": True},
+                            {"id": "date_of_birth", "type": "string", "value_type": "llm_prompt", "description": "the date of birth of the patient ", "dynamic_variable": "", "constant_value": "", "required": True},
+                            {"id": "department_id", "type": "string", "value_type": "llm_prompt", "description": "the department the patient is trying to register under ", "dynamic_variable": "", "constant_value": "", "required": True}
+                        ],
+                        "required": False,
+                        "value_type": "llm_prompt"
+                    },
+                    "request_headers": [],
+                    "auth_connection": None
+                },
+                "response_timeout_secs": 20,
                 "dynamic_variables": {"dynamic_variable_placeholders": {}}
             }
-            webhooks.append(webhook)
-        return webhooks 
+        ] 

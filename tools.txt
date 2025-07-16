@@ -1,0 +1,71 @@
+{
+  "name": "register_patient",
+  "description": "Register a new patient ",
+  "type": "webhook",
+  "api_schema": {
+    "url": "https://d20c8d64dbc3.ngrok-free.app/api/tools/register-patient",
+    "method": "POST",
+    "path_params_schema": [],
+    "query_params_schema": [],
+    "request_body_schema": {
+      "id": "body",
+      "type": "object",
+      "description": "Collect patient name and phone number ",
+      "properties": [
+        {
+          "id": "patient_phone",
+          "type": "string",
+          "value_type": "llm_prompt",
+          "description": "the phone number of the patient ",
+          "dynamic_variable": "",
+          "constant_value": "",
+          "required": true
+        },
+        {
+          "id": "patient_name",
+          "type": "string",
+          "value_type": "llm_prompt",
+          "description": "the patients full name ",
+          "dynamic_variable": "",
+          "constant_value": "",
+          "required": true
+        },
+        {
+          "id": "email",
+          "type": "string",
+          "value_type": "llm_prompt",
+          "description": "The email of the patient ",
+          "dynamic_variable": "",
+          "constant_value": "",
+          "required": true
+        },
+        {
+          "id": "date_of_birth",
+          "type": "string",
+          "value_type": "llm_prompt",
+          "description": "the date of birth of the patient ",
+          "dynamic_variable": "",
+          "constant_value": "",
+          "required": true
+        },
+        {
+          "id": "department_id",
+          "type": "string",
+          "value_type": "llm_prompt",
+          "description": "the department the patient is trying to register under ",
+          "dynamic_variable": "",
+          "constant_value": "",
+          "required": true
+        }
+      ],
+      "required": false,
+      "value_type": "llm_prompt"
+    },
+    "request_headers": [],
+    "auth_connection": null
+  },
+  "response_timeout_secs": 20,
+  "dynamic_variables": {
+    "dynamic_variable_placeholders": {}
+  }
+}

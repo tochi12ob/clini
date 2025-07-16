@@ -1,0 +1,412 @@
+{
+  "conversation_config": {
+    "asr": {
+      "quality": "high",
+      "provider": "elevenlabs",
+      "user_input_audio_format": "pcm_8000"
+    },
+    "turn": {
+      "turn_timeout": 7,
+      "silence_end_call_timeout": -1,
+      "mode": "silence"
+    },
+    "tts": {
+      "model_id": "eleven_turbo_v2",
+      "voice_id": "cjVigY5qzO86Huf0OWal",
+      "agent_output_audio_format": "pcm_8000",
+      "optimize_streaming_latency": 0,
+      "stability": 0.5,
+      "speed": 1,
+      "similarity_boost": 0.8
+    },
+    "conversation": {
+      "text_only": false,
+      "max_duration_seconds": 600,
+      "client_events": ["conversation_initiation_metadata"]
+    },
+    "language_presets": {},
+    "agent": {
+      "first_message": "",
+      "language": "en",
+      "prompt": {
+        "prompt": "",
+        "llm": "gpt-4o-mini",
+        "temperature": 0,
+        "max_tokens": -1,
+        "ignore_default_personality": true,
+        "rag": {
+          "enabled": false,
+          "embedding_model": "e5_mistral_7b_instruct",
+          "max_vector_distance": 0.6,
+          "max_documents_length": 50000,
+          "max_retrieved_rag_chunks_count": 20
+        },
+        "tools": [
+          {
+            "name": "athena_check_availability",
+            "description": "Check appointment availability for a clinic using Athena Health EHR.",
+            "response_timeout_secs": 20,
+            "type": "webhook",
+            "api_schema": {
+              "url": "https://a962b0243a61.ngrok-free.app/api/tools/check-availability",
+              "method": "POST",
+              "path_params_schema": {},
+              "query_params_schema": {
+                "properties": {
+                  "dummy_param": {
+                    "type": "string",
+                    "description": "This is a required placeholder due to API schema constraints. It is not used."
+                  }
+                },
+                "required": []
+              },
+              "request_body_schema": {
+                "type": "object",
+                "properties": {
+                  "clinic_id": {
+                    "type": "string",
+                    "description": "Clinic identifier"
+                  },
+                  "department_id": {
+                    "type": "string",
+                    "description": "Department ID for appointment booking"
+                  },
+                  "date": {
+                    "type": "string",
+                    "description": "Date to check availability (MM/DD/YYYY or natural language)"
+                  },
+                  "provider": {
+                    "type": "string",
+                    "description": "EHR provider (defaults to 'athena')",
+                    "default": "athena"
+                  },
+                  "patient_name": {
+                    "type": "string",
+                    "description": "Patient's full name"
+                  },
+                  "patient_phone": {
+                    "type": "string",
+                    "description": "Patient's phone number"
+                  },
+                  "date_of_birth": {
+                    "type": "string",
+                    "description": "Patient's date of birth"
+                  }
+                },
+                "required": ["department_id", "date"]
+              },
+              "request_headers": {},
+              "auth_connection": null
+            },
+            "dynamic_variables": {
+              "dynamic_variable_placeholders": {}
+            }
+          },
+          {
+            "name": "athena_book_appointment",
+            "description": "Book an appointment using Athena Health EHR.",
+            "response_timeout_secs": 20,
+            "type": "webhook",
+            "api_schema": {
+              "url": "https://a962b0243a61.ngrok-free.app/api/tools/book-appointment",
+              "method": "POST",
+              "path_params_schema": {},
+              "query_params_schema": {
+                "properties": {
+                  "dummy_param": {
+                    "type": "string",
+                    "description": "This is a required placeholder due to API schema constraints. It is not used."
+                  }
+                },
+                "required": []
+              },
+              "request_body_schema": {
+                "type": "object",
+                "properties": {
+                  "clinic_id": {
+                    "type": "string",
+                    "description": "Clinic identifier"
+                  },
+                  "patient_name": {
+                    "type": "string",
+                    "description": "Patient's full name"
+                  },
+                  "patient_phone": {
+                    "type": "string",
+                    "description": "Patient's phone number"
+                  },
+                  "date_of_birth": {
+                    "type": "string",
+                    "description": "Patient's date of birth"
+                  },
+                  "appointment_date": {
+                    "type": "string",
+                    "description": "Desired appointment date"
+                  },
+                  "appointment_time": {
+                    "type": "string",
+                    "description": "Desired appointment time"
+                  },
+                  "department_id": {
+                    "type": "string",
+                    "description": "Department ID"
+                  },
+                  "provider_id": {
+                    "type": "string",
+                    "description": "Provider ID"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "description": "Reason for visit"
+                  },
+                  "provider": {
+                    "type": "string",
+                    "description": "EHR provider (defaults to 'athena')",
+                    "default": "athena"
+                  }
+                },
+                "required": ["patient_name", "patient_phone", "appointment_date", "appointment_time", "department_id"]
+              },
+              "request_headers": {},
+              "auth_connection": null
+            },
+            "dynamic_variables": {
+              "dynamic_variable_placeholders": {}
+            }
+          },
+          {
+            "name": "athena_search_patients",
+            "description": "Search for patients in Athena Health EHR.",
+            "response_timeout_secs": 20,
+            "type": "webhook",
+            "api_schema": {
+              "url": "https://a962b0243a61.ngrok-free.app/api/tools/search-patients",
+              "method": "POST",
+              "path_params_schema": {},
+              "query_params_schema": {
+                "properties": {
+                  "dummy_param": {
+                    "type": "string",
+                    "description": "This is a required placeholder due to API schema constraints. It is not used."
+                  }
+                },
+                "required": []
+              },
+              "request_body_schema": {
+                "type": "object",
+                "properties": {
+                  "clinic_id": {
+                    "type": "string",
+                    "description": "Clinic identifier"
+                  },
+                  "first_name": {
+                    "type": "string",
+                    "description": "Patient's first name"
+                  },
+                  "last_name": {
+                    "type": "string",
+                    "description": "Patient's last name"
+                  },
+                  "date_of_birth": {
+                    "type": "string",
+                    "description": "Patient's date of birth"
+                  },
+                  "phone": {
+                    "type": "string",
+                    "description": "Patient's phone number"
+                  },
+                  "provider": {
+                    "type": "string",
+                    "description": "EHR provider (defaults to 'athena')",
+                    "default": "athena"
+                  }
+                },
+                "required": ["first_name", "last_name"]
+              },
+              "request_headers": {},
+              "auth_connection": null
+            },
+            "dynamic_variables": {
+              "dynamic_variable_placeholders": {}
+            }
+          },
+          {
+            "name": "athena_verify_patient",
+            "description": "Verify patient information in Athena Health EHR.",
+            "response_timeout_secs": 20,
+            "type": "webhook",
+            "api_schema": {
+              "url": "https://a962b0243a61.ngrok-free.app/api/tools/verify-patient",
+              "method": "POST",
+              "path_params_schema": {},
+              "query_params_schema": {
+                "properties": {
+                  "dummy_param": {
+                    "type": "string",
+                    "description": "This is a required placeholder due to API schema constraints. It is not used."
+                  }
+                },
+                "required": []
+              },
+              "request_body_schema": {
+                "type": "object",
+                "properties": {
+                  "clinic_id": {
+                    "type": "string",
+                    "description": "Clinic identifier"
+                  },
+                  "patient_name": {
+                    "type": "string",
+                    "description": "Patient's full name"
+                  },
+                  "patient_phone": {
+                    "type": "string",
+                    "description": "Patient's phone number"
+                  },
+                  "date_of_birth": {
+                    "type": "string",
+                    "description": "Patient's date of birth"
+                  },
+                  "provider": {
+                    "type": "string",
+                    "description": "EHR provider (defaults to 'athena')",
+                    "default": "athena"
+                  }
+                },
+                "required": ["patient_name", "patient_phone"]
+              },
+              "request_headers": {},
+              "auth_connection": null
+            },
+            "dynamic_variables": {
+              "dynamic_variable_placeholders": {}
+            }
+          },
+          {
+            "name": "athena_register_patient",
+            "description": "Register a new patient in Athena Health EHR.",
+            "response_timeout_secs": 20,
+            "type": "webhook",
+            "api_schema": {
+              "url": "https://a962b0243a61.ngrok-free.app/api/tools/register-patient",
+              "method": "POST",
+              "path_params_schema": {},
+              "query_params_schema": {
+                "properties": {
+                  "dummy_param": {
+                    "type": "string",
+                    "description": "This is a required placeholder due to API schema constraints. It is not used."
+                  }
+                },
+                "required": []
+              },
+              "request_body_schema": {
+                "type": "object",
+                "properties": {
+                  "clinic_id": {
+                    "type": "string",
+                    "description": "Clinic identifier"
+                  },
+                  "patient_name": {
+                    "type": "string",
+                    "description": "Patient's full name"
+                  },
+                  "patient_phone": {
+                    "type": "string",
+                    "description": "Patient's phone number"
+                  },
+                  "date_of_birth": {
+                    "type": "string",
+                    "description": "Patient's date of birth"
+                  },
+                  "email": {
+                    "type": "string",
+                    "description": "Patient's email address"
+                  },
+                  "address": {
+                    "type": "string",
+                    "description": "Patient's address"
+                  },
+                  "emergency_contact": {
+                    "type": "string",
+                    "description": "Emergency contact information"
+                  },
+                  "insurance_info": {
+                    "type": "string",
+                    "description": "Insurance information"
+                  },
+                  "provider": {
+                    "type": "string",
+                    "description": "EHR provider (defaults to 'athena')",
+                    "default": "athena"
+                  }
+                },
+                "required": ["patient_name", "patient_phone", "date_of_birth"]
+              },
+              "request_headers": {},
+              "auth_connection": null
+            },
+            "dynamic_variables": {
+              "dynamic_variable_placeholders": {}
+            }
+          },
+          {
+            "name": "athena_pre_check_patient",
+            "description": "Pre-check if patient exists in Athena Health EHR before proceeding.",
+            "response_timeout_secs": 20,
+            "type": "webhook",
+            "api_schema": {
+              "url": "https://a962b0243a61.ngrok-free.app/api/tools/pre-check-patient",
+              "method": "POST",
+              "path_params_schema": {},
+              "query_params_schema": {
+                "properties": {
+                  "dummy_param": {
+                    "type": "string",
+                    "description": "This is a required placeholder due to API schema constraints. It is not used."
+                  }
+                },
+                "required": []
+              },
+              "request_body_schema": {
+                "type": "object",
+                "properties": {
+                  "clinic_id": {
+                    "type": "string",
+                    "description": "Clinic identifier"
+                  },
+                  "patient_name": {
+                    "type": "string",
+                    "description": "Patient's full name"
+                  },
+                  "patient_phone": {
+                    "type": "string",
+                    "description": "Patient's phone number"
+                  },
+                  "date_of_birth": {
+                    "type": "string",
+                    "description": "Patient's date of birth"
+                  },
+                  "provider": {
+                    "type": "string",
+                    "description": "EHR provider (defaults to 'athena')",
+                    "default": "athena"
+                  }
+                },
+                "required": ["patient_name", "patient_phone"]
+              },
+              "request_headers": {},
+              "auth_connection": null
+            },
+            "dynamic_variables": {
+              "dynamic_variable_placeholders": {}
+            }
+          }
+        ]
+      }
+    }
+  },
+  "metadata": {
+    "created_at_unix_secs": 42
+  }
+} 

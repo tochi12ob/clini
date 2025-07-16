@@ -1632,8 +1632,23 @@ def create_patient(first_name: str, last_name: str, phone: str,
         with httpx.Client(timeout=30.0) as client:
             response = client.post(api_url, headers=headers, data=patient_data)
             
+            # Print the raw Athena API response for debugging
+            print("ATHENA RAW RESPONSE STATUS:", response.status_code)
+            print("ATHENA RAW RESPONSE TEXT:", response.text)
+            
             if response.status_code == 200:
                 result = response.json()
+                if isinstance(result, list):
+                    # If it's a list with one dict, use that dict
+                    if len(result) == 1 and isinstance(result[0], dict):
+                        result = result[0]
+                    else:
+                        return {
+                            "success": False,
+                            "error": "Athena API returned a list instead of a dict.",
+                            "details": result,
+                            "message": "Unexpected response format from Athena API during patient creation."
+                        }
                 patient_id = result.get("patientid")
                 
                 return {

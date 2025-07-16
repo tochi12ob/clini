@@ -470,3 +470,23 @@ async def retry_clinic_setup(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to retry setup: {str(e)}"
         )
+
+@router.get("/clinics")
+async def list_registered_clinics(db: Session = Depends(get_db)):
+    """
+    Get a list of all registered clinics and their details (id, name, phone, email, address, twilio phone number, agent ID and name).
+    """
+    clinics = db.query(Clinic).all()
+    result = []
+    for clinic in clinics:
+        result.append({
+            "id": clinic.id,
+            "name": clinic.name,
+            "phone": clinic.phone,
+            "email": clinic.email,
+            "address": clinic.address,
+            "twilio_phone_number": clinic.twilio_phone_number,
+            "agent_id": clinic.elevenlabs_agent_id,
+            "agent_name": clinic.elevenlabs_agent_name
+        })
+    return result

@@ -80,16 +80,15 @@ class TwilioService:
             # Purchase the first available number
             number_to_purchase = available_numbers[0]
             
-            # Configure webhook URLs
-            voice_webhook_url = f"{self.webhook_base_url}/webhooks/twilio/voice/{clinic_id}"
-            sms_webhook_url = f"{self.webhook_base_url}/webhooks/twilio/sms/{clinic_id}"
+            # Use ElevenLabs endpoint for Twilio webhook
+            elevenlabs_webhook_url = "https://api.us.elevenlabs.io/twilio/inbound_call"
             
             # Purchase the phone number
             purchased_number = self.client.incoming_phone_numbers.create(
                 phone_number=number_to_purchase.phone_number,
-                voice_url=voice_webhook_url,
+                voice_url=elevenlabs_webhook_url,
                 voice_method='POST',
-                sms_url=sms_webhook_url,
+                sms_url=elevenlabs_webhook_url,
                 sms_method='POST',
                 friendly_name=f"Clinic {clinic_id} - AI Assistant"
             )
@@ -100,8 +99,8 @@ class TwilioService:
                 "phone_number": purchased_number.phone_number,
                 "sid": purchased_number.sid,
                 "friendly_name": purchased_number.friendly_name,
-                "voice_url": voice_webhook_url,
-                "sms_url": sms_webhook_url,
+                "voice_url": elevenlabs_webhook_url,
+                "sms_url": elevenlabs_webhook_url,
                 "capabilities": {
                     "voice": True,
                     "sms": True
@@ -131,13 +130,12 @@ class TwilioService:
             return False
         
         try:
-            voice_webhook_url = f"{self.webhook_base_url}/webhooks/twilio/voice/{clinic_id}"
-            sms_webhook_url = f"{self.webhook_base_url}/webhooks/twilio/sms/{clinic_id}"
+            elevenlabs_webhook_url = "https://api.us.elevenlabs.io/twilio/inbound_call"
             
             self.client.incoming_phone_numbers(phone_sid).update(
-                voice_url=voice_webhook_url,
+                voice_url=elevenlabs_webhook_url,
                 voice_method='POST',
-                sms_url=sms_webhook_url,
+                sms_url=elevenlabs_webhook_url,
                 sms_method='POST'
             )
             

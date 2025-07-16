@@ -13,29 +13,22 @@ from integration.athena_health_client import (
     search_patients,
     get_patient_insurance,
     create_appointment,
-    update_patient
+    update_patient,
+    cancel_appointment,
+    get_patient_details,
+    create_appointment_slot
 )
-# Epic FHIR imports
-from integration.epic_fhir_client import (
-    search_patients as epic_search_patients,
-    get_patient_appointments as epic_get_patient_appointments,
-    search_appointments as epic_search_appointments,
-    find_available_slots as epic_find_slots,
-    book_fhir_appointment as epic_book_appointment,
-    search_practitioners as epic_search_practitioners,
-    get_patient_details as epic_get_patient_details,
-    test_fhir_connection as epic_test_connection
-)
+
 import os
 import httpx
 
-router = APIRouter(prefix="/api/tools", tags=["agent-tools"])
+router = APIRouter(tags=["agent-tools"])
 
 # Common provider field mixin for Pydantic models
 class ProviderMixin(BaseModel):
     """Mixin for common provider and clinic fields"""
     clinic_id: Optional[str] = None
-    provider: Optional[str] = "athena"  # "athena" or "epic"
+    provider: Optional[str] = "athena"  # "athena"
 
 # Global session storage for clinic context
 # This maps call/session identifiers to clinic information
@@ -96,19 +89,15 @@ class RegisterPatientRequest(ProviderMixin):
     emergency_contact_phone: Optional[str] = None
     insurance_provider: Optional[str] = None
 
-class EpicSearchPatientsRequest(BaseModel):
-    """Request model for Epic patient search"""
+class SearchPatientsRequest(ProviderMixin):
+    """Request model for searching patients"""
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     date_of_birth: Optional[str] = None
     phone: Optional[str] = None
-    identifier: Optional[str] = None
+    limit: Optional[int] = 10
 
-class EpicSearchProvidersRequest(BaseModel):
-    """Request model for Epic provider search"""
-    name: Optional[str] = None
-    specialty: Optional[str] = None
-    location_id: Optional[str] = None
+
 
 # Common response helpers
 def create_success_response(message: str, data: Dict[str, Any] = None, provider: str = None) -> Dict[str, Any]:
@@ -154,52 +143,7 @@ def prepare_request(request) -> tuple[str, str]:
     provider = auto_detect_provider(request)
     return clinic_id, provider
 
-def format_epic_patient(patient: Dict) -> Dict:
-    """Format Epic FHIR patient data for consistent response"""
-    names = patient.get("name", [])
-    full_name = "Unknown"
-    if names:
-        given = " ".join(names[0].get("given", []))
-        family = names[0].get("family", "")
-        full_name = f"{given} {family}".strip()
-    
-    # Extract contact info
-    telecoms = patient.get("telecom", [])
-    phone = next((t.get("value") for t in telecoms if t.get("system") == "phone"), "")
-    
-    return {
-        "id": patient.get("id"),
-        "name": full_name,
-        "birth_date": patient.get("birthDate"),
-        "gender": patient.get("gender"),
-        "phone": phone,
-        "active": patient.get("active", True)
-    }
 
-def format_epic_provider(practitioner: Dict) -> Dict:
-    """Format Epic FHIR practitioner data for consistent response"""
-    names = practitioner.get("name", [])
-    full_name = "Unknown Provider"
-    if names:
-        given = " ".join(names[0].get("given", []))
-        family = names[0].get("family", "")
-        prefix = " ".join(names[0].get("prefix", []))
-        full_name = f"{prefix} {given} {family}".strip()
-    
-    # Extract qualifications/specialties
-    qualifications = practitioner.get("qualification", [])
-    specialties = []
-    for qual in qualifications:
-        code = qual.get("code", {})
-        if code.get("text"):
-            specialties.append(code.get("text"))
-    
-    return {
-        "id": practitioner.get("id"),
-        "name": full_name,
-        "specialties": specialties,
-        "active": practitioner.get("active", True)
-    }
 
 # Helper functions
 def get_current_clinic_id():
@@ -212,10 +156,8 @@ def get_current_clinic_id():
     except:
         pass
     
-    # If no context, try to get from session based on some identifier
-    # For now, we'll use a default clinic for testing
-    # In production, this would be determined by the phone number called
-    return "clinic_1"  # Default to dental clinic for testing
+    # Return default clinic ID
+    return "clinic_1"  # Default clinic ID
 
 def ensure_clinic_id(request):
     """Ensure request has clinic_id, either from request or context"""
@@ -461,7 +403,7 @@ async def webhook_check_availability(request: CheckAvailabilityRequest, http_req
     """
     Webhook endpoint for checking appointment availability with patient pre-check.
     Called by ElevenLabs agent when user asks about available times.
-    Supports both Athena Health and Epic FHIR providers.
+    Supports Athena Health provider.
     Automatically detects provider based on clinic configuration.
     """
     try:
@@ -478,10 +420,7 @@ async def webhook_check_availability(request: CheckAvailabilityRequest, http_req
             )
         
         # Route to appropriate provider
-        if provider == "epic":
-            availability_result = await epic_check_availability(request)
-        else:
-            availability_result = await athena_check_availability(request)
+        availability_result = await athena_check_availability(request)
         
         # Enhance response with patient context
         if patient_check_result and request.patient_name:
@@ -569,92 +508,14 @@ async def athena_check_availability(request: CheckAvailabilityRequest) -> Dict[s
         "provider": "athena"
     }
 
-async def epic_check_availability(request: CheckAvailabilityRequest) -> Dict[str, Any]:
-    """Handle Epic FHIR availability checking"""
-    # Parse the natural language date
-    start_date, end_date = parse_natural_date(request.date or "tomorrow")
-    
-    # Convert MM/DD/YYYY to YYYY-MM-DD for Epic FHIR
-    try:
-        parsed_start = datetime.strptime(start_date, "%m/%d/%Y")
-        parsed_end = datetime.strptime(end_date, "%m/%d/%Y")
-        epic_start_date = parsed_start.strftime("%Y-%m-%d")
-        epic_end_date = parsed_end.strftime("%Y-%m-%d")
-    except ValueError:
-        epic_start_date = datetime.now().strftime("%Y-%m-%d")
-        epic_end_date = epic_start_date
-    
-    # Search for available slots using Epic FHIR
-    result = epic_find_slots(
-        start_date=epic_start_date,
-        end_date=epic_end_date,
-        service_type=request.service_type,
-        duration=request.duration_minutes
-    )
-    
-    if result.get("success") and result.get("available_slots"):
-        # Format response for agent
-        slots = []
-        full_slots = []
-        
-        for slot in result["available_slots"][:5]:
-            slot_start = slot.get("start", "")
-            slot_date = slot_start.split("T")[0] if "T" in slot_start else epic_start_date
-            slot_time = slot_start.split("T")[1].split(":")[0:2] if "T" in slot_start else ["", ""]
-            slot_time_str = ":".join(slot_time) if len(slot_time) == 2 else slot_start
-            
-            # Extract provider info
-            practitioners = slot.get("practitioner", [])
-            provider_name = "Available provider"
-            if practitioners:
-                provider_ref = practitioners[0].get("actor", {}).get("reference", "")
-                if provider_ref:
-                    provider_name = f"Provider {provider_ref.split('/')[-1]}"
-            
-            slot_id = slot.get("id", "")
-            
-            slots.append({
-                "time": slot_time_str,
-                "date": slot_date,
-                "provider": provider_name,
-                "appointment_id": slot_id,
-                "system": "epic"
-            })
-            
-            # Store complete slot details
-            full_slot = slot.copy()
-            full_slot["appointment_id"] = slot_id
-            full_slot["system"] = "epic"
-            full_slot["formatted_date"] = slot_date
-            full_slot["formatted_time"] = slot_time_str
-            full_slots.append(full_slot)
-        
-        # Store complete slots in tracker for later booking
-        appointment_tracker.store_availability(start_date, full_slots)
-        
-        return {
-            "available": True,
-            "message": f"I found {len(slots)} available appointments",
-            "slots": slots,
-            "date_checked": start_date,
-            "provider": "epic",
-            "booking_instruction": "When the patient selects a time, use the book_appointment tool with provider=epic and the corresponding appointment_id"
-        }
-    else:
-        return {
-            "available": False,
-            "message": f"No appointments available on {start_date}",
-            "suggestion": "Would you like me to check a different date?",
-            "date_checked": start_date,
-            "provider": "epic"
-        }
+
 
 @router.post("/book-appointment")
 async def webhook_book_appointment(request: BookAppointmentRequest) -> Dict[str, Any]:
     """
     Webhook endpoint for booking appointments.
     Called by ElevenLabs agent when user confirms they want to book.
-    Supports both Athena Health and Epic FHIR providers.
+    Supports Athena Health provider.
     Automatically detects provider based on clinic configuration.
     """
     try:
@@ -662,10 +523,7 @@ async def webhook_book_appointment(request: BookAppointmentRequest) -> Dict[str,
         request.provider = provider
         
         # Route to appropriate provider
-        if provider == "epic":
-            return await epic_book_appointment_webhook(request)
-        else:
-            return await athena_book_appointment(request)
+        return await athena_book_appointment(request)
             
     except Exception as e:
         return create_error_response(
@@ -765,18 +623,10 @@ async def webhook_register_patient(request: RegisterPatientRequest) -> Dict[str,
             
             # Actually create the patient in the system
             if provider == "athena":
-                from athena_health_client import create_patient
+                from integration.athena_health_client import create_patient
                 
-                # Get department_id from clinic configuration or use default
-                clinic_id = get_current_clinic_id()
+                # Use default department ID
                 department_id = "1"  # Default department ID
-                
-                if clinic_id:
-                    from clinic_manager import ClinicManager
-                    clinic_manager = ClinicManager()
-                    clinic_info = clinic_manager.get_clinic_by_id(clinic_id)
-                    if clinic_info and clinic_info.get("department_id"):
-                        department_id = clinic_info["department_id"]
                 
                 # Test mode for development - simulate success for "Test" patients
                 if "test" in request.patient_name.lower():
@@ -865,7 +715,7 @@ async def webhook_register_patient(request: RegisterPatientRequest) -> Dict[str,
                             "fallback_action": "manual_registration"
                         }
             else:
-                # Epic or other providers - fallback to manual process
+                # Other providers - fallback to manual process
                 response_message = create_natural_response(
                     request.patient_name,
                     "Perfect! I've started your registration process. You'll receive a call within 24 hours to complete your new patient setup and verify your insurance information.",
@@ -923,17 +773,9 @@ async def athena_book_appointment(request: BookAppointmentRequest) -> Dict[str, 
     # Log the incoming request
     print(f"Book appointment request: {request.dict()}")
     
-    # If no appointment_id provided, try to find it from tracker
+    # If no appointment_id provided, we'll need to get it from availability check
     if not request.appointment_id and request.date and request.time:
-        # Normalize time format for search
-        time_str = request.time
-        if "AM" in time_str.upper() or "PM" in time_str.upper():
-            time_str = time_str.replace("AM", "").replace("PM", "").strip()
-        
-        found_id = appointment_tracker.find_slot_by_time(request.date, time_str)
-        if found_id:
-            request.appointment_id = found_id
-            print(f"Found appointment_id from tracker: {found_id}")
+        print(f"No appointment_id provided, will need to check availability first")
     
     # Extract patient info
     first_name, last_name = extract_patient_name(request.patient_name or "")
@@ -976,15 +818,9 @@ async def athena_book_appointment(request: BookAppointmentRequest) -> Dict[str, 
     
     # Book the appointment
     if request.appointment_id:
-        # Map service type to appointment type using clinic-specific configuration
-        clinic_id = request.clinic_id or get_current_clinic_id()
-        service_mapping = get_clinic_appointment_mapping(clinic_id, request.service_type)
-        
-        print(f"DEBUG: Booking with service mapping: {service_mapping}")
-        
-        # Use the correct appointment type for this service and clinic
-        appointment_type_id = service_mapping["type_id"]
-        reason = service_mapping["name"]
+        # Use default appointment type mapping
+        appointment_type_id = "2"  # Default appointment type ID
+        reason = request.service_type or "Office Visit"
         
         print(f"DEBUG: Booking appointment {request.appointment_id} for patient {patient_id}")
         print(f"DEBUG: Using appointment type {appointment_type_id}, reason: {reason}")
@@ -1007,17 +843,17 @@ async def athena_book_appointment(request: BookAppointmentRequest) -> Dict[str, 
     else:
         # Find and book based on date/time
         date_str, _ = parse_natural_date(request.date or "tomorrow")
-        # Map service type to appointment type using clinic-specific configuration
-        clinic_id = request.clinic_id or get_current_clinic_id()
-        service_mapping = get_clinic_appointment_mapping(clinic_id, request.service_type)
+        # Use default appointment type mapping
+        appointment_type_id = "2"  # Default appointment type ID
+        reason = request.service_type or "Office Visit"
         
         result = create_appointment(
             patient_id=patient_id,
-            department_id="1",  # Would come from clinic config
+            department_id="1",  # Default department ID
             appointment_date=date_str,
             appointment_time=request.time,
-            reason=service_mapping["name"],
-            appointment_type_id=service_mapping["type_id"]
+            reason=reason,
+            appointment_type_id=appointment_type_id
         )
     
     if result.get("success"):
@@ -1030,7 +866,7 @@ async def athena_book_appointment(request: BookAppointmentRequest) -> Dict[str, 
             "message": f"Perfect! Your {service_type} appointment has been booked successfully!",
             "confirmation_number": confirmation_id,
             "details": f"{service_type.capitalize()} on {request.date} at {request.time}",
-            "appointment_type": service_mapping["name"] if 'service_mapping' in locals() else "Office Visit",
+            "appointment_type": "Office Visit",
             "provider": "athena",
             "next_steps": "You should receive a confirmation call or email. Please arrive 15 minutes early."
         }
@@ -1044,145 +880,14 @@ async def athena_book_appointment(request: BookAppointmentRequest) -> Dict[str, 
             "suggestion": "Would you like me to check for other available times?"
         }
 
-async def epic_book_appointment_webhook(request: BookAppointmentRequest) -> Dict[str, Any]:
-    """Handle Epic FHIR appointment booking"""
-    print(f"Epic book appointment request: {request.dict()}")
-    
-    # Extract patient info
-    first_name, last_name = extract_patient_name(request.patient_name or "")
-    
-    if not (first_name and last_name):
-        return {
-            "success": False,
-            "message": "I need your full name to book the appointment",
-            "missing_info": ["patient_name"],
-            "provider": "epic"
-        }
-    
-    # Search for patient in Epic
-    patient_search = epic_search_patients(
-        first_name=first_name,
-        last_name=last_name,
-        phone=normalize_phone_number(request.patient_phone),
-        limit=1
-    )
-    
-    if not (patient_search.get("success") and patient_search.get("patients")):
-        return {
-            "success": False,
-            "message": "I couldn't find your patient record in Epic. You may need to register as a new patient.",
-            "action_needed": "new_patient_registration",
-            "provider": "epic"
-        }
-    
-    patient_id = patient_search["patients"][0].get("id")
-    if not patient_id:
-        return {
-            "success": False,
-            "message": "Unable to get patient ID from Epic",
-            "provider": "epic"
-        }
-    
-    # Get stored slot details if we have appointment_id
-    stored_slot = None
-    if request.appointment_id:
-        stored_slot = appointment_tracker.get_slot_details(request.appointment_id)
-        print(f"DEBUG: Epic stored slot details: {stored_slot}")
-    
-    # Determine practitioner and slot details
-    practitioner_id = None
-    start_time = None
-    end_time = None
-    
-    if stored_slot:
-        # Extract practitioner from stored slot
-        practitioners = stored_slot.get("practitioner", [])
-        if practitioners:
-            practitioner_ref = practitioners[0].get("actor", {}).get("reference", "")
-            if practitioner_ref and "/" in practitioner_ref:
-                practitioner_id = practitioner_ref.split("/")[-1]
-        
-        # Use the times from stored slot
-        start_time = stored_slot.get("start")
-        end_time = stored_slot.get("end")
-    
-    # If no stored slot, construct times from request
-    if not start_time and request.date and request.time:
-        try:
-            # Convert date from MM/DD/YYYY to YYYY-MM-DD
-            parsed_date = datetime.strptime(request.date, "%m/%d/%Y")
-            date_str = parsed_date.strftime("%Y-%m-%d")
-            
-            # Construct ISO datetime (assuming time is in HH:MM format)
-            if ":" in request.time:
-                start_time = f"{date_str}T{request.time}:00"
-                # Assume 30-minute appointment if no end time
-                end_time = f"{date_str}T{request.time}:30"
-            else:
-                return {
-                    "success": False,
-                    "message": "Invalid time format. Please provide time in HH:MM format",
-                    "provider": "epic"
-                }
-        except ValueError:
-            return {
-                "success": False,
-                "message": "Invalid date format. Please use MM/DD/YYYY format",
-                "provider": "epic"
-            }
-    
-    # Book the appointment using Epic FHIR
-    if request.appointment_id and stored_slot:
-        # Use the slot ID for booking
-        result = epic_book_appointment(
-            slot_id=request.appointment_id,
-            patient_id=patient_id,
-            practitioner_id=practitioner_id,
-            start_time=start_time,
-            end_time=end_time,
-            reason=request.service_type or "Office Visit",
-            comment=f"Booked via conversational AI for {request.patient_name}"
-        )
-    else:
-        return {
-            "success": False,
-            "message": "I need to check availability first to get the appointment slot details",
-            "action_needed": "check_availability",
-            "missing_info": ["appointment_id"],
-            "provider": "epic",
-            "suggestion": "Please let me check the availability again to get the correct appointment slot"
-        }
-    
-    if result.get("success"):
-        service_type = request.service_type or "appointment"
-        appointment_data = result.get("appointment", {})
-        confirmation_id = appointment_data.get("id") or request.appointment_id
-        
-        return {
-            "success": True,
-            "message": f"Perfect! Your {service_type} appointment has been booked successfully in Epic!",
-            "confirmation_number": confirmation_id,
-            "details": f"{service_type.capitalize()} on {request.date} at {request.time}",
-            "appointment_type": "FHIR Appointment",
-            "provider": "epic",
-            "next_steps": "You should receive a confirmation. Please arrive 15 minutes early."
-        }
-    else:
-        error_message = result.get("error", "The time slot may no longer be available")
-        return {
-            "success": False,
-            "message": f"I'm sorry, I couldn't book that appointment in Epic. {error_message}",
-            "reason": error_message,
-            "provider": "epic",
-            "suggestion": "Would you like me to check for other available times?"
-        }
+
 
 @router.post("/verify-patient")
 async def webhook_verify_patient(request: VerifyPatientRequest) -> Dict[str, Any]:
     """
     Webhook endpoint for patient verification.
     Called when agent needs to verify patient identity.
-    Supports both Athena Health and Epic FHIR providers.
+    Supports Athena Health provider.
     Automatically detects provider based on clinic configuration.
     """
     try:
@@ -1190,10 +895,7 @@ async def webhook_verify_patient(request: VerifyPatientRequest) -> Dict[str, Any
         request.provider = provider
         
         # Route to appropriate provider
-        if provider == "epic":
-            return await epic_verify_patient(request)
-        else:
-            return await athena_verify_patient(request)
+        return await athena_verify_patient(request)
             
     except Exception as e:
         return create_error_response(
@@ -1237,171 +939,9 @@ async def athena_verify_patient(request: VerifyPatientRequest) -> Dict[str, Any]
             "provider": "athena"
         }
 
-async def epic_verify_patient(request: VerifyPatientRequest) -> Dict[str, Any]:
-    """Handle Epic FHIR patient verification"""
-    first_name, last_name = extract_patient_name(request.patient_name or "")
-    
-    # Search for patient in Epic
-    result = epic_search_patients(
-        first_name=first_name,
-        last_name=last_name,
-        phone=normalize_phone_number(request.patient_phone),
-        date_of_birth=normalize_date_of_birth(request.date_of_birth),
-        limit=1
-    )
-    
-    if result.get("success") and result.get("patients"):
-        patient = result["patients"][0]
-        patient_id = patient.get("id")
-        
-        # Get patient details
-        details_result = epic_get_patient_details(patient_id)
-        patient_details = details_result.get("patient", {}) if details_result.get("success") else {}
-        
-        # Check recent appointments to get last visit
-        appointments_result = epic_get_patient_appointments(patient_id)
-        last_visit = None
-        if appointments_result.get("success") and appointments_result.get("appointments"):
-            # Get the most recent past appointment
-            for apt in appointments_result["appointments"]:
-                apt_date = apt.get("start", "")
-                if apt_date and apt.get("status") in ["fulfilled", "arrived"]:
-                    last_visit = apt_date.split("T")[0] if "T" in apt_date else apt_date
-                    break
-        
-        return {
-            "verified": True,
-            "message": f"I found your record in Epic, {first_name}",
-            "patient_id": patient_id,
-            "has_insurance_on_file": bool(patient_details.get("identifier")),  # Assuming identifiers indicate insurance
-            "last_visit": last_visit,
-            "provider": "epic"
-        }
-    else:
-        return {
-            "verified": False,
-            "message": "I couldn't find your patient record in Epic",
-            "suggestion": "You may need to register as a new patient",
-            "provider": "epic"
-        }
 
-# === EPIC-SPECIFIC WEBHOOK ENDPOINTS ===
 
-@router.post("/epic/search-patients")
-async def epic_search_patients_webhook(request: EpicSearchPatientsRequest) -> Dict[str, Any]:
-    """
-    Epic-specific patient search webhook.
-    Provides detailed patient search functionality for Epic FHIR.
-    """
-    try:
-        result = epic_search_patients(
-            first_name=request.first_name,
-            last_name=request.last_name,
-            date_of_birth=request.date_of_birth,
-            phone=normalize_phone_number(request.phone) if request.phone else None,
-            identifier=request.identifier
-        )
-        
-        if result.get("success"):
-            patients = result.get("patients", [])
-            
-            # Format patient data for agent response
-            formatted_patients = [format_epic_patient(patient) for patient in patients]
-            
-            return create_success_response(
-                message=f"Found {len(formatted_patients)} patients",
-                data={
-                    "patients": formatted_patients,
-                    "count": len(formatted_patients)
-                },
-                provider="epic"
-            )
-        else:
-            return create_error_response(
-                message="No patients found",
-                error=result.get("error"),
-                provider="epic"
-            )
-            
-    except Exception as e:
-        return create_error_response(
-            message="Error searching for patients",
-            error=str(e),
-            provider="epic"
-        )
 
-@router.post("/epic/search-providers")
-async def epic_search_providers_webhook(request: EpicSearchProvidersRequest) -> Dict[str, Any]:
-    """
-    Epic-specific provider search webhook.
-    Finds practitioners/providers in Epic FHIR system.
-    """
-    try:
-        result = epic_search_practitioners(
-            name=request.name,
-            specialty=request.specialty,
-            location_id=request.location_id
-        )
-        
-        if result.get("success"):
-            practitioners = result.get("practitioners", [])
-            
-            # Format practitioner data for agent response
-            formatted_providers = [format_epic_provider(practitioner) for practitioner in practitioners]
-            
-            return create_success_response(
-                message=f"Found {len(formatted_providers)} providers",
-                data={
-                    "providers": formatted_providers,
-                    "count": len(formatted_providers)
-                },
-                provider="epic"
-            )
-        else:
-            return create_error_response(
-                message="No providers found",
-                error=result.get("error"),
-                provider="epic"
-            )
-            
-    except Exception as e:
-        return create_error_response(
-            message="Error searching for providers",
-            error=str(e),
-            provider="epic"
-        )
-
-@router.get("/epic/test-connection")
-async def epic_test_connection_webhook() -> Dict[str, Any]:
-    """
-    Test Epic FHIR connection.
-    Useful for troubleshooting and verifying Epic integration.
-    """
-    try:
-        result = epic_test_connection()
-        
-        if result.get("success"):
-            return create_success_response(
-                message="Epic FHIR connection successful",
-                data={
-                    "fhir_version": result.get("fhir_version"),
-                    "software": result.get("software")
-                },
-                provider="epic"
-            )
-        else:
-            return create_error_response(
-                message="Epic FHIR connection failed",
-                error=result.get("error"),
-                provider="epic"
-            )
-            
-    except Exception as e:
-        return create_error_response(
-            message="Error testing Epic connection",
-            error=str(e),
-            provider="epic"
-        )
 
 # Test endpoint
 @router.get("/test")
@@ -1410,21 +950,16 @@ async def test_tools():
     return {
         "status": "active",
         "endpoints": [
-            # Universal endpoints (support both Athena and Epic)
+            # Universal endpoints (support Athena)
             "/api/tools/pre-check-patient",
             "/api/tools/check-availability",
             "/api/tools/book-appointment", 
             "/api/tools/verify-patient",
-            "/api/tools/register-patient",
-            # Epic-specific endpoints
-            "/api/tools/epic/search-patients",
-            "/api/tools/epic/search-providers",
-            "/api/tools/epic/test-connection"
+            "/api/tools/register-patient"
         ],
-        "providers_supported": ["athena", "epic"],
+        "providers_supported": ["athena"],
         "usage": {
-            "universal_endpoints": "Provider automatically detected from clinic configuration. Can override with 'provider' field ('athena' or 'epic')",
-            "epic_specific": "Use /epic/ prefixed endpoints for Epic FHIR-specific functionality",
+            "universal_endpoints": "Provider automatically detected from clinic configuration. Can override with 'provider' field ('athena')",
             "auto_detection": "Provider selection is now automatic based on clinic 'healthcare_provider' field"
         },
         "provider_selection": {
@@ -1990,95 +1525,7 @@ def create_cultural_confirmation(name: str, cultural_indicators: list) -> str:
     else:
         return f"Great! I have {name} - thank you for spelling that out, {first_name}!"
 
-def get_clinic_appointment_mapping(clinic_id: str, service_description: str) -> dict:
-    """
-    Get appointment type mapping for a specific clinic based on patient's service request.
-    This replaces the hard-coded service mapping with clinic-specific configuration.
-    
-    Args:
-        clinic_id: The clinic ID to get configuration for
-        service_description: What the patient said they need
-        
-    Returns:
-        dict with appointment type details or default appointment type
-    """
-    if not clinic_id or not service_description:
-        # Return generic appointment type as fallback
-        return {
-            "type_id": "2", 
-            "duration": 30, 
-            "name": "General Visit",
-            "description": "General appointment"
-        }
-    
-    try:
-        from clinic_manager import ClinicManager
-        clinic_manager = ClinicManager()
-        clinic_info = clinic_manager.get_clinic_by_id(clinic_id)
-        
-        if not clinic_info or "appointment_types" not in clinic_info:
-            print(f"DEBUG: No appointment types configured for clinic {clinic_id}, using default")
-            return {
-                "type_id": "2", 
-                "duration": 30, 
-                "name": "General Visit",
-                "description": "General appointment"
-            }
-        
-        appointment_types = clinic_info["appointment_types"]
-        service_lower = service_description.lower().strip()
-        
-        print(f"DEBUG: Searching clinic {clinic_id} appointment types for: '{service_description}'")
-        
-        # First, try exact keyword matching
-        for apt_key, apt_config in appointment_types.items():
-            keywords = apt_config.get("keywords", [])
-            for keyword in keywords:
-                if keyword.lower() in service_lower:
-                    print(f"DEBUG: Matched keyword '{keyword}' to appointment type '{apt_config['name']}'")
-                    return {
-                        "type_id": apt_config["ehr_type_id"],
-                        "duration": apt_config["duration"],
-                        "name": apt_config["name"],
-                        "description": apt_config["description"],
-                        "appointment_key": apt_key
-                    }
-        
-        # If no keyword match, look for default appointment type
-        for apt_key, apt_config in appointment_types.items():
-            if apt_config.get("is_default", False):
-                print(f"DEBUG: Using default appointment type '{apt_config['name']}'")
-                return {
-                    "type_id": apt_config["ehr_type_id"],
-                    "duration": apt_config["duration"],
-                    "name": apt_config["name"],
-                    "description": apt_config["description"],
-                    "appointment_key": apt_key
-                }
-        
-        # Final fallback - use first appointment type available
-        if appointment_types:
-            first_apt = list(appointment_types.values())[0]
-            print(f"DEBUG: Using first available appointment type '{first_apt['name']}'")
-            return {
-                "type_id": first_apt["ehr_type_id"],
-                "duration": first_apt["duration"],
-                "name": first_apt["name"],
-                "description": first_apt["description"],
-                "appointment_key": list(appointment_types.keys())[0]
-            }
-            
-    except Exception as e:
-        print(f"DEBUG: Error getting clinic appointment mapping: {e}")
-    
-    # Ultimate fallback
-    print(f"DEBUG: Using ultimate fallback appointment type")
-    return {
-        "type_id": "2", 
-        "duration": 30, 
-        "name": "General Visit",
-        "description": "General appointment"
-    }
+
 
 
 # =============================================================================
@@ -2154,58 +1601,15 @@ async def handle_emergency_call(request: EmergencyRequest) -> Dict[str, Any]:
         
         # Urgent but not life-threatening
         elif urgency_level in ["high", "urgent", "critical"]:
-            clinic_id = get_current_clinic_id()
-            
-            try:
-                from clinic_manager import ClinicManager
-                clinic_manager = ClinicManager()
-                clinic_info = clinic_manager.get_clinic_by_id(clinic_id)
-                
-                # Check if clinic is currently open
-                current_time = datetime.now()
-                is_open = False
-                hours_info = "Please check our website for hours"
-                
-                if clinic_info and clinic_info.get("hours"):
-                    today = current_time.strftime("%A").lower()
-                    today_hours = clinic_info["hours"].get(today, "Closed")
-                    hours_info = f"Today's hours: {today_hours}"
-                    
-                    # Simple check if we're open (this could be enhanced)
-                    if "closed" not in today_hours.lower() and "-" in today_hours:
-                        is_open = True
-                
-                if is_open:
-                    return create_success_response(
-                        message=f"I understand this is urgent, {patient_name}. Let me get you to our clinical staff right away. Please hold while I transfer you.",
-                        data={
-                            "action": "urgent_transfer",
-                            "transfer_to": "clinical_staff",
-                            "priority": "urgent",
-                            "wait_time_estimate": "2-3 minutes"
-                        }
-                    )
-                else:
-                    emergency_number = clinic_info.get("emergency_phone", clinic_info.get("phone", "[CLINIC_PHONE]"))
-                    return create_success_response(
-                        message=f"We're currently closed ({hours_info}). For urgent medical needs, please go to the nearest emergency room or call our after-hours line at {emergency_number}.",
-                        data={
-                            "action": "after_hours_urgent",
-                            "emergency_resources": True,
-                            "after_hours_number": emergency_number,
-                            "nearest_er_info": True
-                        }
-                    )
-                    
-            except Exception as e:
-                print(f"Error checking clinic hours: {e}")
-                return create_success_response(
-                    message="I understand this is urgent. Let me transfer you to someone who can help you right away.",
-                    data={
-                        "action": "urgent_transfer",
-                        "transfer_to": "clinical_staff"
-                    }
-                )
+            return create_success_response(
+                message=f"I understand this is urgent, {patient_name}. Let me get you to our clinical staff right away. Please hold while I transfer you.",
+                data={
+                    "action": "urgent_transfer",
+                    "transfer_to": "clinical_staff",
+                    "priority": "urgent",
+                    "wait_time_estimate": "2-3 minutes"
+                }
+            )
         
         # Non-urgent but patient expressed concern
         return create_success_response(
@@ -2241,10 +1645,7 @@ async def modify_existing_appointment(request: ModifyAppointmentRequest) -> Dict
         
         if action == "cancel":
             # Import the appropriate cancel function based on provider
-            if provider == "epic":
-                from epic_fhir_client import cancel_appointment
-            else:
-                from athena_health_client import cancel_appointment
+            from integration.athena_health_client import cancel_appointment
             
             if appointment_id:
                 result = cancel_appointment(appointment_id)
@@ -2358,10 +1759,7 @@ async def verify_patient_insurance(request: InsuranceVerificationRequest) -> Dic
         first_name, last_name = extract_patient_name(patient_name)
         
         # Import appropriate search function
-        if provider == "epic":
-            from epic_fhir_client import search_patients
-        else:
-            from athena_health_client import search_patients
+        from integration.athena_health_client import search_patients
             
         search_result = search_patients(first_name=first_name, last_name=last_name)
         
@@ -2369,10 +1767,7 @@ async def verify_patient_insurance(request: InsuranceVerificationRequest) -> Dic
             patient_id = search_result["patients"][0].get("patientid")
             
             # Check their insurance on file
-            if provider == "epic":
-                from epic_fhir_client import get_patient_insurance
-            else:
-                from athena_health_client import get_patient_insurance
+            from integration.athena_health_client import get_patient_insurance
                 
             insurance_result = get_patient_insurance(patient_id)
             
@@ -2450,19 +1845,23 @@ async def get_practice_information(request: PracticeInfoRequest) -> Dict[str, An
         info_type = request.info_type or "general"
         specific_service = request.specific_service
         
-        clinic_id = get_current_clinic_id()
-        
-        try:
-            from clinic_manager import ClinicManager
-            clinic_manager = ClinicManager()
-            clinic_info = clinic_manager.get_clinic_by_id(clinic_id)
-        except:
-            clinic_info = None
-        
-        if not clinic_info:
-            return create_error_response(
-                message="I'm having trouble accessing our practice information right now. Let me transfer you to someone who can help."
-            )
+        # Use default practice information
+        clinic_info = {
+            "name": "Our Medical Practice",
+            "phone": "(555) 123-4567",
+            "address": "123 Medical Center Dr, Suite 100",
+            "hours": {
+                "monday": "8:00 AM - 5:00 PM",
+                "tuesday": "8:00 AM - 5:00 PM", 
+                "wednesday": "8:00 AM - 5:00 PM",
+                "thursday": "8:00 AM - 5:00 PM",
+                "friday": "8:00 AM - 5:00 PM",
+                "saturday": "9:00 AM - 2:00 PM",
+                "sunday": "Closed"
+            },
+            "services": ["General Check-ups", "Preventive Care", "Chronic Disease Management", "Vaccinations", "Lab Work"],
+            "insurance_accepted": ["Blue Cross Blue Shield", "Aetna", "Cigna", "UnitedHealth", "Medicare", "Medicaid"]
+        }
         
         print(f"DEBUG: Practice info request - Type: {info_type}")
         
@@ -2987,18 +2386,8 @@ async def reset_conversation_context(request: Request) -> Dict[str, Any]:
         
         print(f"DEBUG: Resetting conversation - Reason: {reason}")
         
-        # Get clinic info for personalized greeting
-        clinic_id = get_current_clinic_id()
-        clinic_name = "our clinic"
-        
-        try:
-            from clinic_manager import ClinicManager
-            clinic_manager = ClinicManager()
-            clinic_info = clinic_manager.get_clinic_by_id(clinic_id)
-            if clinic_info:
-                clinic_name = clinic_info.get("name", "our clinic")
-        except:
-            pass
+        # Use default clinic name
+        clinic_name = "Our Medical Practice"
         
         name_part = f", {patient_name}" if patient_name else ""
         
@@ -3044,24 +2433,21 @@ class OfficeStatusRequest(BaseModel):
 async def check_if_clinic_open(request: OfficeStatusRequest) -> Dict[str, Any]:
     """Check if clinic is currently open and provide detailed status information"""
     try:
-        clinic_id = get_current_clinic_id()
-        
-        # Get clinic manager and clinic info
-        try:
-            from clinic_manager import ClinicManager
-            clinic_manager = ClinicManager()
-            clinic_info = clinic_manager.get_clinic_by_id(clinic_id)
-        except Exception as e:
-            print(f"Error initializing clinic manager: {e}")
-            return create_error_response(
-                message="I'm having trouble checking our office hours right now. Please call our main number for current hours.",
-                error=str(e)
-            )
-        
-        if not clinic_info:
-            return create_error_response(
-                message="I'm unable to access our office information right now. Please call our main number for assistance."
-            )
+        # Use default clinic information
+        clinic_info = {
+            "name": "Our Medical Practice",
+            "phone": "(555) 123-4567",
+            "emergency_phone": "(555) 123-4568",
+            "hours": {
+                "monday": "8:00 AM - 5:00 PM",
+                "tuesday": "8:00 AM - 5:00 PM", 
+                "wednesday": "8:00 AM - 5:00 PM",
+                "thursday": "8:00 AM - 5:00 PM",
+                "friday": "8:00 AM - 5:00 PM",
+                "saturday": "9:00 AM - 2:00 PM",
+                "sunday": "Closed"
+            }
+        }
         
         # Determine what time to check
         check_time = None
@@ -3077,8 +2463,24 @@ async def check_if_clinic_open(request: OfficeStatusRequest) -> Dict[str, Any]:
                 except ValueError:
                     pass  # Use current time if parsing fails
         
-        # Check office status
-        is_open, hours_today = clinic_manager.is_clinic_open(clinic_id, check_time)
+        # Check office status using simple time-based logic
+        current_time = check_time or datetime.now()
+        current_day = current_time.strftime("%A").lower()
+        hours_today = clinic_info["hours"].get(current_day, "Closed")
+        
+        # Simple check if we're open
+        is_open = False
+        if "closed" not in hours_today.lower() and "-" in hours_today:
+            try:
+                # Parse hours (e.g., "8:00 AM - 5:00 PM")
+                open_str, close_str = [s.strip() for s in hours_today.split("-")]
+                open_time = datetime.strptime(open_str, "%I:%M %p").time()
+                close_time = datetime.strptime(close_str, "%I:%M %p").time()
+                current_time_only = current_time.time()
+                
+                is_open = open_time <= current_time_only <= close_time
+            except:
+                is_open = False
         
         current_time = check_time or datetime.now()
         current_day = current_time.strftime("%A")
@@ -3211,22 +2613,19 @@ async def get_detailed_office_hours(request: Request) -> Dict[str, Any]:
         body = await request.json()
         specific_day = body.get("day")  # Optional specific day to check
         
-        clinic_id = get_current_clinic_id()
-        
-        try:
-            from clinic_manager import ClinicManager
-            clinic_manager = ClinicManager()
-            clinic_info = clinic_manager.get_clinic_by_id(clinic_id)
-        except Exception as e:
-            return create_error_response(
-                message="I'm having trouble accessing our hours information. Please call for current hours.",
-                error=str(e)
-            )
-        
-        if not clinic_info:
-            return create_error_response(
-                message="I'm unable to access our office hours right now. Please call our main number."
-            )
+        # Use default clinic information
+        clinic_info = {
+            "name": "Our Medical Practice",
+            "hours": {
+                "monday": "8:00 AM - 5:00 PM",
+                "tuesday": "8:00 AM - 5:00 PM", 
+                "wednesday": "8:00 AM - 5:00 PM",
+                "thursday": "8:00 AM - 5:00 PM",
+                "friday": "8:00 AM - 5:00 PM",
+                "saturday": "9:00 AM - 2:00 PM",
+                "sunday": "Closed"
+            }
+        }
         
         hours = clinic_info.get("hours", {})
         clinic_name = clinic_info.get("name", "Our clinic")
@@ -3286,22 +2685,11 @@ async def check_holiday_schedule(request: Request) -> Dict[str, Any]:
         body = await request.json()
         date_to_check = body.get("date")  # Format: "YYYY-MM-DD"
         
-        clinic_id = get_current_clinic_id()
-        
-        try:
-            from clinic_manager import ClinicManager
-            clinic_manager = ClinicManager()
-            clinic_info = clinic_manager.get_clinic_by_id(clinic_id)
-        except Exception as e:
-            return create_error_response(
-                message="I'm having trouble checking our holiday schedule.",
-                error=str(e)
-            )
-        
-        if not clinic_info:
-            return create_error_response(
-                message="I'm unable to access our schedule information right now."
-            )
+        # Use default clinic information
+        clinic_info = {
+            "holiday_hours": {},
+            "special_hours": {}
+        }
         
         # Check for holiday hours (if clinic has holiday_hours configured)
         holiday_hours = clinic_info.get("holiday_hours", {})
@@ -3373,4 +2761,72 @@ async def check_holiday_schedule(request: Request) -> Dict[str, Any]:
         return create_error_response(
             message="I'm having trouble checking our holiday schedule. Please call for current information.",
             error=str(e)
+        )
+
+@router.post("/get-patient-details")
+async def webhook_get_patient_details(request: Request) -> Dict[str, Any]:
+    """
+    Webhook endpoint to get detailed patient information by patient_id.
+    """
+    data = await request.json()
+    patient_id = data.get("patient_id")
+    if not patient_id:
+        return {"success": False, "message": "Missing patient_id"}
+    from integration.athena_health_client import get_patient_details
+    result = get_patient_details(patient_id)
+    return result
+
+@router.post("/create-appointment-slot")
+async def webhook_create_appointment_slot(request: Request) -> Dict[str, Any]:
+    """
+    Webhook endpoint to create a new appointment slot.
+    """
+    data = await request.json()
+    department_id = data.get("department_id")
+    provider_id = data.get("provider_id")
+    appointment_date = data.get("appointment_date")
+    start_time = data.get("start_time")
+    duration = data.get("duration", 15)
+    appointment_type_id = data.get("appointment_type_id")
+    if not all([department_id, provider_id, appointment_date, start_time]):
+        return {"success": False, "message": "Missing required fields"}
+    from integration.athena_health_client import create_appointment_slot
+    result = create_appointment_slot(
+        department_id=department_id,
+        provider_id=provider_id,
+        appointment_date=appointment_date,
+        start_time=start_time,
+        duration=duration,
+        appointment_type_id=appointment_type_id
+    )
+    return result
+
+@router.post("/search-patients")
+async def webhook_search_patients(request: SearchPatientsRequest) -> Dict[str, Any]:
+    """
+    Webhook endpoint for searching patients by name, DOB, or phone.
+    Returns a list of matching patients (if any).
+    """
+    try:
+        clinic_id, provider = prepare_request(request)
+        request.provider = provider
+
+        # Normalize date of birth if provided
+        dob = normalize_date_of_birth(request.date_of_birth) if request.date_of_birth else None
+        phone = normalize_phone_number(request.phone) if request.phone else None
+
+        from integration.athena_health_client import search_patients
+        result = search_patients(
+            first_name=request.first_name,
+            last_name=request.last_name,
+            date_of_birth=dob,
+            phone=phone,
+            limit=request.limit
+        )
+        return result
+    except Exception as e:
+        return create_error_response(
+            message="Error searching for patients.",
+            error=str(e),
+            provider=getattr(request, 'provider', 'athena')
         )
