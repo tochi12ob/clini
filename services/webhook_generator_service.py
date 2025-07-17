@@ -696,6 +696,30 @@ class WebhookGeneratorService:
         NGROK_URL = getattr(self, 'public_api_domain', None) or "https://clini-v7ur.onrender.com"
         base_url = f"{NGROK_URL}/api/tools"
         # Only output the four specified webhooks, with exact schemas
+        def make_properties(properties_list):
+            props = {}
+            required = []
+            for prop in properties_list:
+                prop_copy = dict(prop)
+                name = prop_copy.pop("id")
+                # Remove fields not valid in OpenAPI/JSON Schema
+                prop_copy.pop("value_type", None)
+                prop_copy.pop("dynamic_variable", None)
+                prop_copy.pop("constant_value", None)
+                req = prop_copy.pop("required", False)
+                props[name] = prop_copy
+                if req:
+                    required.append(name)
+            return props, required
+        dummy_param_schema = {
+            "properties": {
+                "dummy_param": {
+                    "type": "string",
+                    "description": "This is a required placeholder due to API schema constraints. It is not used."
+                }
+            },
+            "required": []
+        }
         return [
             {
                 "name": "search-patients",
@@ -704,23 +728,24 @@ class WebhookGeneratorService:
                 "api_schema": {
                     "url": f"{base_url}/search-patients",
                     "method": "POST",
-                    "path_params_schema": [],
-                    "query_params_schema": [],
-                    "request_body_schema": {
-                        "id": "body",
-                        "type": "object",
-                        "description": "Details to use to make requests to this webhook",
-                        "properties": [
-                            {"id": "practice_id", "type": "string", "value_type": "llm_prompt", "description": "The practice ID ", "dynamic_variable": "", "constant_value": "", "required": True},
-                            {"id": "phone_number", "type": "string", "value_type": "llm_prompt", "description": "The phone number of the patient ", "dynamic_variable": "", "constant_value": "", "required": True},
-                            {"id": "date_of_birth", "type": "string", "value_type": "llm_prompt", "description": "The date of birth of the patient ", "dynamic_variable": "", "constant_value": "", "required": True},
-                            {"id": "first_name", "type": "string", "value_type": "llm_prompt", "description": "The first name of the patient ", "dynamic_variable": "", "constant_value": "", "required": False},
-                            {"id": "last_name", "type": "string", "value_type": "llm_prompt", "description": "The last name of the patient ", "dynamic_variable": "", "constant_value": "", "required": True}
-                        ],
-                        "required": False,
-                        "value_type": "llm_prompt"
-                    },
-                    "request_headers": [],
+                    "path_params_schema": dummy_param_schema,
+                    "query_params_schema": dummy_param_schema,
+                    "request_body_schema": (lambda: (
+                        lambda props, req: {
+                            "type": "object",
+                            "description": "Details to use to make requests to this webhook",
+                            "properties": props,
+                            "required": req
+                        }
+                    )(*make_properties([
+                        {"id": "practice_id", "type": "string", "description": "The practice ID ", "required": True},
+                        {"id": "phone_number", "type": "string", "description": "The phone number of the patient ", "required": True},
+                        {"id": "date_of_birth", "type": "string", "description": "The date of birth of the patient ", "required": True},
+                        {"id": "first_name", "type": "string", "description": "The first name of the patient ", "required": False},
+                        {"id": "last_name", "type": "string", "description": "The last name of the patient ", "required": True}
+                    ]))
+                    )(),
+                    "request_headers": {},
                     "auth_connection": None
                 },
                 "response_timeout_secs": 20,
@@ -733,24 +758,25 @@ class WebhookGeneratorService:
                 "api_schema": {
                     "url": f"{base_url}/create-appointment-slot",
                     "method": "POST",
-                    "path_params_schema": [],
-                    "query_params_schema": [],
-                    "request_body_schema": {
-                        "id": "body",
-                        "type": "object",
-                        "description": "The details to ask from the patient ",
-                        "properties": [
-                            {"id": "practice_id", "type": "string", "value_type": "llm_prompt", "description": "The practice ID of the clinic", "dynamic_variable": "", "constant_value": "", "required": True},
-                            {"id": "start_time", "type": "string", "value_type": "llm_prompt", "description": "The start time of the appointment ", "dynamic_variable": "", "constant_value": "", "required": True},
-                            {"id": "provider_id", "type": "string", "value_type": "llm_prompt", "description": "The ID of the provider ", "dynamic_variable": "", "constant_value": "", "required": True},
-                            {"id": "appointment_type_id", "type": "string", "value_type": "llm_prompt", "description": "The appopintment type id ", "dynamic_variable": "", "constant_value": "", "required": True},
-                            {"id": "appointment_date", "type": "string", "value_type": "llm_prompt", "description": "The appointment ", "dynamic_variable": "", "constant_value": "", "required": True},
-                            {"id": "department_id", "type": "string", "value_type": "llm_prompt", "description": "the department id ", "dynamic_variable": "", "constant_value": "", "required": False}
-                        ],
-                        "required": False,
-                        "value_type": "llm_prompt"
-                    },
-                    "request_headers": [],
+                    "path_params_schema": dummy_param_schema,
+                    "query_params_schema": dummy_param_schema,
+                    "request_body_schema": (lambda: (
+                        lambda props, req: {
+                            "type": "object",
+                            "description": "The details to ask from the patient ",
+                            "properties": props,
+                            "required": req
+                        }
+                    )(*make_properties([
+                        {"id": "practice_id", "type": "string", "description": "The practice ID of the clinic", "required": True},
+                        {"id": "start_time", "type": "string", "description": "The start time of the appointment ", "required": True},
+                        {"id": "provider_id", "type": "string", "description": "The ID of the provider ", "required": True},
+                        {"id": "appointment_type_id", "type": "string", "description": "The appopintment type id ", "required": True},
+                        {"id": "appointment_date", "type": "string", "description": "The appointment ", "required": True},
+                        {"id": "department_id", "type": "string", "description": "the department id ", "required": False}
+                    ]))
+                    )(),
+                    "request_headers": {},
                     "auth_connection": None
                 },
                 "response_timeout_secs": 20,
@@ -763,19 +789,20 @@ class WebhookGeneratorService:
                 "api_schema": {
                     "url": f"{base_url}/get-patient-details",
                     "method": "POST",
-                    "path_params_schema": [],
-                    "query_params_schema": [],
-                    "request_body_schema": {
-                        "id": "body",
-                        "type": "object",
-                        "description": "Collect the id of the patient ",
-                        "properties": [
-                            {"id": "patient_id", "type": "string", "value_type": "llm_prompt", "description": "The patient ID ", "dynamic_variable": "", "constant_value": "", "required": False}
-                        ],
-                        "required": False,
-                        "value_type": "llm_prompt"
-                    },
-                    "request_headers": [],
+                    "path_params_schema": dummy_param_schema,
+                    "query_params_schema": dummy_param_schema,
+                    "request_body_schema": (lambda: (
+                        lambda props, req: {
+                            "type": "object",
+                            "description": "Collect the id of the patient ",
+                            "properties": props,
+                            "required": req
+                        }
+                    )(*make_properties([
+                        {"id": "patient_id", "type": "string", "description": "The patient ID ", "required": False}
+                    ]))
+                    )(),
+                    "request_headers": {},
                     "auth_connection": None
                 },
                 "response_timeout_secs": 20,
@@ -788,23 +815,24 @@ class WebhookGeneratorService:
                 "api_schema": {
                     "url": f"{base_url}/register-patient",
                     "method": "POST",
-                    "path_params_schema": [],
-                    "query_params_schema": [],
-                    "request_body_schema": {
-                        "id": "body",
-                        "type": "object",
-                        "description": "Collect patient name and phone number ",
-                        "properties": [
-                            {"id": "patient_phone", "type": "string", "value_type": "llm_prompt", "description": "the phone number of the patient ", "dynamic_variable": "", "constant_value": "", "required": True},
-                            {"id": "patient_name", "type": "string", "value_type": "llm_prompt", "description": "the patients full name ", "dynamic_variable": "", "constant_value": "", "required": True},
-                            {"id": "email", "type": "string", "value_type": "llm_prompt", "description": "The email of the patient ", "dynamic_variable": "", "constant_value": "", "required": True},
-                            {"id": "date_of_birth", "type": "string", "value_type": "llm_prompt", "description": "the date of birth of the patient ", "dynamic_variable": "", "constant_value": "", "required": True},
-                            {"id": "department_id", "type": "string", "value_type": "llm_prompt", "description": "the department the patient is trying to register under ", "dynamic_variable": "", "constant_value": "", "required": True}
-                        ],
-                        "required": False,
-                        "value_type": "llm_prompt"
-                    },
-                    "request_headers": [],
+                    "path_params_schema": dummy_param_schema,
+                    "query_params_schema": dummy_param_schema,
+                    "request_body_schema": (lambda: (
+                        lambda props, req: {
+                            "type": "object",
+                            "description": "Collect patient name and phone number ",
+                            "properties": props,
+                            "required": req
+                        }
+                    )(*make_properties([
+                        {"id": "patient_phone", "type": "string", "description": "the phone number of the patient ", "required": True},
+                        {"id": "patient_name", "type": "string", "description": "the patients full name ", "required": True},
+                        {"id": "email", "type": "string", "description": "The email of the patient ", "required": True},
+                        {"id": "date_of_birth", "type": "string", "description": "the date of birth of the patient ", "required": True},
+                        {"id": "department_id", "type": "string", "description": "the department the patient is trying to register under ", "required": True}
+                    ]))
+                    )(),
+                    "request_headers": {},
                     "auth_connection": None
                 },
                 "response_timeout_secs": 20,

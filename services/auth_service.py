@@ -8,7 +8,7 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
-from models import Clinic, Staff
+from models import Clinic, Staff, Admin
 import os
 from dotenv import load_dotenv
 import asyncio
@@ -85,6 +85,43 @@ class AuthService:
         if hasattr(staff, 'password_hash') and staff.password_hash and self.verify_password(password, staff.password_hash):
             return staff
         return None
+    
+    def authenticate_admin(self, db: Session, email: str, password: str) -> Optional[Admin]:
+        """Authenticate admin by email and password"""
+        admin = db.query(Admin).filter(Admin.email == email, Admin.is_active == True).first()
+        if not admin:
+            return None
+        if hasattr(admin, 'password_hash') and self.verify_password(password, admin.password_hash):
+            return admin
+        return None
+
+    def create_admin_token(self, admin: Admin) -> str:
+        """Create access token for admin"""
+        token_data = {
+            "user_id": admin.id,
+            "user_type": "admin",
+            "email": admin.email
+        }
+        return self.create_access_token(token_data)
+
+    def register_admin(self, db: Session, email: str, password: str) -> Admin:
+        """Register a new admin"""
+        existing_admin = db.query(Admin).filter(Admin.email == email).first()
+        if existing_admin:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Admin with this email address already exists"
+            )
+        hashed_password = self.get_password_hash(password)
+        admin = Admin(email=email, password_hash=hashed_password)
+        db.add(admin)
+        db.commit()
+        db.refresh(admin)
+        return admin
+
+    def get_admin_by_id(self, db: Session, admin_id: int) -> Optional[Admin]:
+        """Get admin by ID"""
+        return db.query(Admin).filter(Admin.id == admin_id, Admin.is_active == True).first()
     
     def get_clinic_by_id(self, db: Session, clinic_id: int) -> Optional[Clinic]:
         """Get clinic by ID"""

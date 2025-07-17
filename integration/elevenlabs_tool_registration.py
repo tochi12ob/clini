@@ -178,7 +178,55 @@ def register_tool(tool):
     except Exception as e:
         logger.error(f"Exception registering tool {tool['name']}: {str(e)}")
 
+def convert_openapi_to_elevenlabs_format(request_body_schema):
+    """
+    Convert OpenAPI/JSON Schema (properties as dict, required as list) to ElevenLabs tool registration format
+    (properties as list of property objects, with id, type, description, required, etc.)
+    """
+    if not request_body_schema or not isinstance(request_body_schema, dict):
+        return request_body_schema
+    properties = request_body_schema.get("properties", {})
+    required = set(request_body_schema.get("required", []))
+    properties_list = []
+    for prop_name, prop_schema in properties.items():
+        prop_obj = {
+            "id": prop_name,
+            "type": prop_schema.get("type", "string"),
+            "description": prop_schema.get("description", ""),
+            "required": prop_name in required
+        }
+        # Optionally add extra fields if present in the original schema
+        for extra in ["value_type", "dynamic_variable", "constant_value"]:
+            if extra in prop_schema:
+                prop_obj[extra] = prop_schema[extra]
+        properties_list.append(prop_obj)
+    elevenlabs_schema = {
+        "type": request_body_schema.get("type", "object"),
+        "description": request_body_schema.get("description", ""),
+        "properties": properties_list
+    }
+    # Optionally add value_type if present at the top level
+    if "value_type" in request_body_schema:
+        elevenlabs_schema["value_type"] = request_body_schema["value_type"]
+    return elevenlabs_schema
+
+# Example usage (as a comment):
+# openapi_schema = {
+#     "type": "object",
+#     "description": "Details to use to make requests to this webhook",
+#     "properties": {
+#         "practice_id": {"type": "string", "description": "The practice ID"},
+#         "phone_number": {"type": "string", "description": "The phone number of the patient"}
+#     },
+#     "required": ["practice_id", "phone_number"]
+# }
+# elevenlabs_schema = convert_openapi_to_elevenlabs_format(openapi_schema)
+
 if __name__ == "__main__":
+    # Convert all tools' request_body_schema to ElevenLabs format if needed
+    for tool in tools:
+        if tool.get("request_body_schema") and isinstance(tool["request_body_schema"], dict) and "properties" in tool["request_body_schema"] and isinstance(tool["request_body_schema"]["properties"], dict):
+            tool["request_body_schema"] = convert_openapi_to_elevenlabs_format(tool["request_body_schema"])
     for tool in tools:
         register_tool(tool)
     logger.info("Tool registration complete.") 

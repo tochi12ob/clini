@@ -2,6 +2,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from typing import List, Literal, Optional, Dict, Any
 from services.webhook_generator_service import WebhookGeneratorService
+from routes.auth import get_current_user
+from fastapi import Depends
 
 router = APIRouter(prefix="/api/webhook-generator", tags=["webhook-generator"])
 
@@ -27,7 +29,9 @@ class WebhookGenResponse(BaseModel):
     configs: List[dict]
 
 @router.post("/generate", response_model=WebhookGenResponse)
-def generate_webhook(request: WebhookGenRequest):
+def generate_webhook(request: WebhookGenRequest, current_user: dict = Depends(get_current_user)):
+    if current_user.get("user_type") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
     service = WebhookGeneratorService()
     try:
         epic_creds_dict = request.epic_creds.dict() if request.epic_creds else None

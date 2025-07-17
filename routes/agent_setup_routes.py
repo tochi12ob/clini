@@ -520,16 +520,9 @@ async def update_full_agent_config(
     - **clinic_id**: ID of the clinic
     - **config**: Full config dict to PATCH
     """
-    # Access check
-    if current_user.get("user_type") == "clinic":
-        if current_user.get("user_id") != clinic_id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to this clinic")
-    elif current_user.get("user_type") == "staff":
-        staff_clinic_id = current_user.get("clinic_id")
-        if staff_clinic_id != clinic_id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to this clinic")
-    else:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid user type")
+    # Restrict to admin only
+    if current_user.get("user_type") != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
     agent_info = agent_setup_service.get_clinic_agent_info(db, clinic_id)
     if not agent_info:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found for this clinic")
@@ -948,6 +941,7 @@ async def auto_update_tools(
     ehr: str = Body(...),
     epic_creds: dict = Body(None),
     athena_creds: dict = Body(None),
+    current_user: Dict[str, Any] = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -1029,7 +1023,8 @@ async def generate_webhook_tools(
     clinic_id: str = Body(...),
     ehr: str = Body(...),
     epic_creds: dict = Body(None),
-    athena_creds: dict = Body(None)
+    athena_creds: dict = Body(None),
+    current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
     Generate all webhook tools for the clinic/EHR and return the full conversation_config JSON in the required format (matching the user's working sample exactly, with only the fields shown in the sample for each tool, and no extra keys at the top level).

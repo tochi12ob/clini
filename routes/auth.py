@@ -2,7 +2,7 @@
 Authentication Routes for Clinic AI Assistant
 Handles login, registration, token validation, and access control
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Body
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from typing import Dict, Any, Optional
@@ -11,7 +11,7 @@ from datetime import timedelta
 
 from database import get_db
 from services.auth_service import auth_service
-from models import Clinic, Staff
+from models import Clinic, Staff, Admin
 from enum import Enum
 
 # Import StaffRole enum - adjust import based on your models file structure
@@ -73,6 +73,26 @@ class ClinicResponse(BaseModel):
 class VerifyClinicEmailRequest(BaseModel):
     clinic_id: int
     otp: str
+
+class AdminRegisterRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+class AdminLoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+class AthenaCredsModel(BaseModel):
+    athena_client_id: str
+    athena_client_secret: str
+    athena_api_base_url: str
+    athena_practice_id: str
+
+class WebhookToolGenRequest(BaseModel):
+    clinic_id: str
+    ehr: str
+    athena_creds: AthenaCredsModel
+    epic_creds: Optional[Any] = None
 
 # Dependency functions
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> Dict[str, Any]:
@@ -203,6 +223,58 @@ async def register_clinic(
             detail=f"Registration failed: {str(e)}"
         )
 
+@router.post("/register/admin", response_model=TokenResponse)
+async def register_admin(
+    registration_data: AdminRegisterRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Register a new admin
+    - **email**: Admin email address (must be unique)
+    - **password**: Admin password
+    """
+    try:
+        admin = auth_service.register_admin(db, registration_data.email, registration_data.password)
+        access_token = auth_service.create_admin_token(admin)
+        return TokenResponse(
+            access_token=access_token,
+            token_type="bearer",
+            user_type="admin",
+            expires_in=auth_service.access_token_expire_minutes * 60
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Admin registration failed: {str(e)}"
+        )
+
+@router.post("/login/admin", response_model=TokenResponse)
+async def login_admin(
+    login_data: AdminLoginRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Authenticate admin and return access token
+    - **email**: Admin email address
+    - **password**: Admin password
+    """
+    admin = auth_service.authenticate_admin(db, login_data.email, login_data.password)
+    if not admin:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    access_token = auth_service.create_admin_token(admin)
+    return TokenResponse(
+        access_token=access_token,
+        token_type="bearer",
+        user_type="admin",
+        expires_in=auth_service.access_token_expire_minutes * 60
+    )
+
 @router.get("/me")
 async def get_current_user_info(
     current_user: Dict[str, Any] = Depends(get_current_user),
@@ -244,6 +316,18 @@ async def get_current_user_info(
             "clinic_id": staff.clinic_id,
             "role": staff.role.value if staff.role else None,
             "is_active": staff.is_active
+        }
+    
+    elif user_type == "admin":
+        admin = auth_service.get_admin_by_id(db, user_id)
+        if not admin:
+            raise HTTPException(status_code=404, detail="Admin not found")
+        
+        return {
+            "user_type": "admin",
+            "id": admin.id,
+            "email": admin.email,
+            "is_active": admin.is_active
         }
     
     raise HTTPException(status_code=400, detail="Invalid user type")
@@ -490,3 +574,29 @@ async def list_registered_clinics(db: Session = Depends(get_db)):
             "agent_name": clinic.elevenlabs_agent_name
         })
     return result
+
+@router.post("/admin/generate-webhook-json", response_model=WebhookToolGenRequest)
+async def admin_generate_webhook_json(
+    clinic_id: str = Body(...),
+    athena_client_id: str = Body(...),
+    athena_client_secret: str = Body(...),
+    athena_api_base_url: str = Body(...),
+    athena_practice_id: str = Body(...),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Generate the exact JSON payload for webhook tool generation for admins to copy and use elsewhere.
+    """
+    if current_user.get("user_type") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return WebhookToolGenRequest(
+        clinic_id=clinic_id,
+        ehr="athena",
+        athena_creds=AthenaCredsModel(
+            athena_client_id=athena_client_id,
+            athena_client_secret=athena_client_secret,
+            athena_api_base_url=athena_api_base_url,
+            athena_practice_id=athena_practice_id
+        ),
+        epic_creds=None
+    )
