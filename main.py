@@ -42,7 +42,7 @@ app.add_middleware(
         # Add your production URLs here when deploying
     ],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "PATCH" "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "PATCH","DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
