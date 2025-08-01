@@ -41,6 +41,8 @@ app.add_middleware(
         "http://127.0.0.1:5173",
         "app.clinivocx.com",
         "https://app.clinivocx.com",
+        "https://clini-v7ur.onrender.com",
+        "http://clini-v7ur.onrender.com",
         # Add your production URLs here when deploying
     ],
     allow_credentials=True,
