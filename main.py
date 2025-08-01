@@ -39,6 +39,8 @@ app.add_middleware(
         "http://localhost:5173",  # Vite default port
         "http://127.0.0.1:3000",
         "http://127.0.0.1:5173",
+        "app.clinivocx.com",
+        "https://app.clinivocx.com",
         # Add your production URLs here when deploying
     ],
     allow_credentials=True,
