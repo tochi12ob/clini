@@ -76,6 +76,15 @@ class Clinic(Base):
     knowledge_base_id = Column(String(100), nullable=True)  # ElevenLabs knowledge base ID
     setup_results = Column(JSON, nullable=True)  # Store setup results for debugging
     
+    # Calendly integration fields
+    calendly_access_token = Column(String(500), nullable=True)
+    calendly_refresh_token = Column(String(500), nullable=True)
+    calendly_user_uri = Column(String(255), nullable=True)
+    calendly_organization_uri = Column(String(255), nullable=True)
+    calendly_webhook_signing_key = Column(String(255), nullable=True)
+    calendly_connected_at = Column(DateTime(timezone=True), nullable=True)
+    calendly_sync_enabled = Column(Boolean, default=False)
+    
     # Status and timestamps
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -191,6 +200,12 @@ class Appointment(Base):
     notes = Column(Text, nullable=True)
     special_requirements = Column(Text, nullable=True)
     
+    # External system integration
+    external_id = Column(String(255), nullable=True)
+    external_system = Column(String(50), nullable=True)  # 'calendly', 'google', 'epic', etc.
+    calendly_event_uri = Column(String(255), nullable=True)
+    calendly_invitee_uri = Column(String(255), nullable=True)
+    
     # Reminder settings
     reminder_sent = Column(Boolean, default=False)
     reminder_sent_at = Column(DateTime, nullable=True)
@@ -220,6 +235,9 @@ class Call(Base):
     twilio_call_sid = Column(String(100), nullable=True, unique=True)
     from_number = Column(String(20), nullable=False)
     to_number = Column(String(20), nullable=False)
+    
+    # ElevenLabs conversation ID
+    conversation_id = Column(String(100), nullable=True, unique=True, index=True)
     
     # Call metadata
     call_type = Column(Enum(CallType), nullable=False)

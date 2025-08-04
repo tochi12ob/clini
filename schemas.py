@@ -615,3 +615,41 @@ class HealthCheckResponse(BaseSchema):
     database_connected: bool
     external_services: Dict[str, bool] = {}
     uptime_seconds: Optional[int] = None
+
+# Conversation Schemas for ElevenLabs Integration
+class ConversationTranscriptEntry(BaseSchema):
+    role: str  # "user" or "agent"
+    time_in_call_secs: float
+    message: str
+
+class ConversationMetadata(BaseSchema):
+    start_time_unix_secs: int
+    call_duration_secs: Optional[int] = None
+
+class ConversationAnalysis(BaseSchema):
+    sentiment: Optional[str] = None
+    topics: Optional[List[str]] = None
+    summary: Optional[str] = None
+    action_items: Optional[List[str]] = None
+    follow_up_required: Optional[bool] = None
+
+class ConversationDetail(BaseSchema):
+    agent_id: str
+    conversation_id: str
+    status: str  # initiated, in-progress, processing, done, failed
+    transcript: List[ConversationTranscriptEntry]
+    metadata: ConversationMetadata
+    has_audio: bool
+    has_user_audio: bool
+    has_response_audio: bool
+    user_id: Optional[str] = None
+    analysis: Optional[ConversationAnalysis] = None
+    conversation_initiation_client_data: Optional[Dict[str, Any]] = None
+
+class ConversationListResponse(BaseSchema):
+    conversations: List[Any]
+    total: int
+    page: int
+    size: int
+    agent_id: str
+    message: Optional[str] = None
