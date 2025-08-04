@@ -25,6 +25,8 @@ from routes.auth import router as clinic_router
 from routes.agent_setup_routes import router as agent_setup_router
 from routes.webhook_generator_routes import router as webhook_gen_router
 from routes.webhook_tools_routes import router as webhook_tools_router
+from routes.conversation_routes import router as conversation_router
+from routes.elevenlabs_webhook_routes import router as elevenlabs_webhook_router
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -56,6 +58,8 @@ app.include_router(clinic_router, prefix="/clinic",tags=["clinic-registration"])
 app.include_router(agent_setup_router, prefix="/api", tags=["Agent Setup"])
 app.include_router(webhook_gen_router, prefix="", tags=["webhook-generator"])
 app.include_router(webhook_tools_router, prefix="", tags=["webhook-tools"])
+app.include_router(conversation_router, tags=["conversations"])
+app.include_router(elevenlabs_webhook_router, tags=["elevenlabs-webhooks"])
 
 @app.get("/")
 async def root():
