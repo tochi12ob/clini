@@ -215,17 +215,19 @@ class AgentSetupService:
                     
                     # Update call record with response data
                     if response and hasattr(response, 'conversation_id'):
+                        conversation_id = getattr(response, 'conversation_id', None)
                         call_record.twilio_call_sid = getattr(response, 'callSid', None)
+                        call_record.conversation_id = conversation_id  # Store ElevenLabs conversation ID
                         call_record.status = CallStatus.IN_PROGRESS
                         call_record.started_at = db.query(func.now()).scalar()
                         
                         db.commit()
                         
-                        logger.info(f"Successfully initiated outbound call {call_record.id} for clinic {clinic_id}")
+                        logger.info(f"Successfully initiated outbound call {call_record.id} for clinic {clinic_id} with conversation_id {conversation_id}")
                         
                         return {
                             "call_id": call_record.id,
-                            "conversation_id": getattr(response, 'conversation_id', None),
+                            "conversation_id": conversation_id,
                             "call_sid": getattr(response, 'callSid', None),
                             "status": "initiated",
                             "from_number": agent_info["twilio_phone_number"],
@@ -456,7 +458,8 @@ class AgentSetupService:
                             "clinic_id": clinic_id,
                             "knowledge_base_id": knowledge_base_id,
                             "agent_id": clinic.elevenlabs_agent_id,
-                            "status": "uploaded"
+                            "status": "uploaded",
+                            "elevenlabs_response": response_data  # Full JSON response from ElevenLabs
                         }
                     else:
                         logger.error(f"ElevenLabs API error: {response.status_code} - {response.text}")
@@ -536,7 +539,8 @@ class AgentSetupService:
                     "clinic_id": clinic_id,
                     "knowledge_base_id": knowledge_base_id,
                     "agent_id": clinic.elevenlabs_agent_id,
-                    "status": "uploaded"
+                    "status": "uploaded",
+                    "elevenlabs_response": response_data  # Full JSON response from ElevenLabs
                 }
             else:
                 logger.error(f"ElevenLabs API error: {response.status_code} - {response.text}")

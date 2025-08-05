@@ -11,6 +11,11 @@ from typing import Dict, Any, Optional, List
 from pydantic import BaseModel, Field
 from datetime import datetime
 import os
+import json
+import os
+from typing import Dict, Any
+from fastapi import HTTPException, status, UploadFile, File, Depends
+from sqlalchemy.orm import Session
 
 from database import get_db
 from services.agent_setup_service import agent_setup_service
@@ -73,6 +78,7 @@ class DocumentUploadResponse(BaseModel):
     knowledge_base_id: Optional[str] = None
     agent_id: Optional[str] = None
     status: str
+    elevenlabs_response: Optional[Dict[str, Any]] = Field(None, description="Full JSON response from ElevenLabs")
 
 class CallStatusResponse(BaseModel):
     call_id: int
@@ -712,6 +718,7 @@ async def import_phone_number_to_elevenlabs(
         "message": "Phone number imported successfully"
     }
 
+
 @router.post("/my-clinic/knowledge-base/upload", response_model=DocumentUploadResponse)
 async def upload_document_to_knowledge_base(
     file: UploadFile = File(...),
@@ -765,13 +772,67 @@ async def upload_document_to_knowledge_base(
                 detail="Failed to upload document to knowledge base"
             )
         
-        return DocumentUploadResponse(**upload_result)
+        # Get the clinic record to update the knowledge_base_id field
+        clinic = db.query(Clinic).filter(Clinic.id == clinic_id).first()
+        if not clinic:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Clinic not found"
+            )
         
+        # Store the complete upload result data in knowledge_base_id column
+        try:
+            # Parse existing knowledge_base_id as JSON array of document data
+            if clinic.knowledge_base_id:
+                try:
+                    # Try to parse as JSON array first
+                    existing_documents = json.loads(clinic.knowledge_base_id)
+                    if not isinstance(existing_documents, list):
+                        # If it's not a list, convert old data to list format
+                        existing_documents = [existing_documents] if existing_documents else []
+                except json.JSONDecodeError:
+                    # If existing value isn't valid JSON, start fresh
+                    existing_documents = []
+            else:
+                # No existing data, start with empty list
+                existing_documents = []
+            
+            # Check if this document_id already exists to avoid duplicates
+            document_id = upload_result.get("document_id")
+            document_exists = any(
+                doc.get("document_id") == document_id 
+                for doc in existing_documents 
+                if isinstance(doc, dict)
+            )
+            
+            if not document_exists:
+                # Add the complete upload result data to the list
+                existing_documents.append(upload_result)
+                
+                # Update the knowledge_base_id column with the JSON array
+                clinic.knowledge_base_id = json.dumps(existing_documents)
+                
+                # Commit the changes to the database
+                db.commit()
+                db.refresh(clinic)
+                
+                print(f"Successfully stored document data for clinic {clinic_id}")
+                print(f"Document ID: {document_id}")
+                print(f"Total documents stored: {len(existing_documents)}")
+            else:
+                print(f"Document {document_id} already exists for clinic {clinic_id}")
+                
+        except Exception as e:
+            print(f"Error updating clinic knowledge_base_id: {str(e)}")
+            # Don't fail the upload if we can't update the clinic record
+            # The document was still uploaded successfully to ElevenLabs
+        
+        return DocumentUploadResponse(**upload_result)
+    
     finally:
         # Clean up temporary file
         if os.path.exists(temp_file_path):
-            os.unlink(temp_file_path) 
-
+            os.unlink(temp_file_path)
 @router.post("/clinic/{clinic_id}/assign-phone-to-agent")
 async def assign_phone_to_agent(
     clinic_id: int,

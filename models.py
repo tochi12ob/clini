@@ -73,7 +73,7 @@ class Clinic(Base):
     twilio_phone_number = Column(String(20), nullable=True)  # The actual phone number
     elevenlabs_agent_id = Column(String(100), nullable=True)  # ElevenLabs agent ID
     elevenlabs_agent_name = Column(String(255), nullable=True)  # ElevenLabs agent name
-    knowledge_base_id = Column(String(100), nullable=True)  # ElevenLabs knowledge base ID
+    knowledge_base_id = Column(Text, nullable=True) 
     setup_results = Column(JSON, nullable=True)  # Store setup results for debugging
     
     # Calendly integration fields

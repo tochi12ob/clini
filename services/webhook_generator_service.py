@@ -837,5 +837,105 @@ class WebhookGeneratorService:
                 },
                 "response_timeout_secs": 20,
                 "dynamic_variables": {"dynamic_variable_placeholders": {}}
+            },
+            {
+                "name": "calendly-check-availability",
+                "description": "Check available appointment slots using Calendly or Google Calendar",
+                "type": "webhook",
+                "api_schema": {
+                    "url": f"{base_url}/calendly-check-availability",
+                    "method": "POST",
+                    "path_params_schema": dummy_param_schema,
+                    "query_params_schema": dummy_param_schema,
+                    "request_body_schema": (lambda: (
+                        lambda props, req: {
+                            "type": "object",
+                            "description": "Check calendar availability",
+                            "properties": props,
+                            "required": req
+                        }
+                    )(*make_properties([
+                        {"id": "clinic_id", "type": "string", "description": "The clinic ID", "required": True},
+                        {"id": "date", "type": "string", "description": "Date to check (YYYY-MM-DD format)", "required": True},
+                        {"id": "duration", "type": "integer", "description": "Appointment duration in minutes (default: 30)", "required": False}
+                    ])))()
+                },
+                "response_timeout_secs": 20,
+                "dynamic_variables": {"dynamic_variable_placeholders": {}}
+            },
+            {
+                "name": "calendly-book-appointment",
+                "description": "Book an appointment using Calendly or Google Calendar",
+                "type": "webhook",
+                "api_schema": {
+                    "url": f"{base_url}/calendly-book-appointment",
+                    "method": "POST",
+                    "path_params_schema": dummy_param_schema,
+                    "query_params_schema": dummy_param_schema,
+                    "request_body_schema": (lambda: (
+                        lambda props, req: {
+                            "type": "object",
+                            "description": "Book a calendar appointment",
+                            "properties": props,
+                            "required": req
+                        }
+                    )(*make_properties([
+                        {"id": "clinic_id", "type": "string", "description": "The clinic ID", "required": True},
+                        {"id": "patient_id", "type": "string", "description": "The patient ID", "required": True},
+                        {"id": "date_time", "type": "string", "description": "Appointment date and time (ISO format)", "required": True},
+                        {"id": "duration_minutes", "type": "integer", "description": "Duration in minutes (default: 30)", "required": False},
+                        {"id": "appointment_type", "type": "string", "description": "Type of appointment", "required": False},
+                        {"id": "notes", "type": "string", "description": "Additional notes", "required": False}
+                    ])))()
+                },
+                "response_timeout_secs": 20,
+                "dynamic_variables": {"dynamic_variable_placeholders": {}}
+            },
+            {
+                "name": "calendly-reschedule-appointment",
+                "description": "Reschedule an existing Calendly or Google Calendar appointment",
+                "type": "webhook",
+                "api_schema": {
+                    "url": f"{base_url}/calendly-reschedule-appointment",
+                    "method": "POST",
+                    "path_params_schema": dummy_param_schema,
+                    "query_params_schema": dummy_param_schema,
+                    "request_body_schema": (lambda: (
+                        lambda props, req: {
+                            "type": "object",
+                            "description": "Reschedule an appointment",
+                            "properties": props,
+                            "required": req
+                        }
+                    )(*make_properties([
+                        {"id": "appointment_id", "type": "string", "description": "The appointment ID to reschedule", "required": True},
+                        {"id": "new_datetime", "type": "string", "description": "New date and time (ISO format)", "required": True}
+                    ])))()
+                },
+                "response_timeout_secs": 20,
+                "dynamic_variables": {"dynamic_variable_placeholders": {}}
+            },
+            {
+                "name": "calendly-cancel-appointment",
+                "description": "Cancel a Calendly or Google Calendar appointment",
+                "type": "webhook",
+                "api_schema": {
+                    "url": f"{base_url}/calendly-cancel-appointment",
+                    "method": "POST",
+                    "path_params_schema": dummy_param_schema,
+                    "query_params_schema": dummy_param_schema,
+                    "request_body_schema": (lambda: (
+                        lambda props, req: {
+                            "type": "object",
+                            "description": "Cancel an appointment",
+                            "properties": props,
+                            "required": req
+                        }
+                    )(*make_properties([
+                        {"id": "appointment_id", "type": "string", "description": "The appointment ID to cancel", "required": True}
+                    ])))()
+                },
+                "response_timeout_secs": 20,
+                "dynamic_variables": {"dynamic_variable_placeholders": {}}
             }
         ] 

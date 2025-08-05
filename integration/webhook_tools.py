@@ -940,8 +940,172 @@ async def athena_verify_patient(request: VerifyPatientRequest) -> Dict[str, Any]
         }
 
 
+# Calendly/Google Calendar appointment endpoints
+@router.post("/calendly-check-availability")
+async def webhook_calendly_check_availability(request: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Check availability for Calendly/Google Calendar appointments
+    """
+    try:
+        clinic_id = request.get("clinic_id")
+        date = request.get("date")
+        duration = request.get("duration", 30)
+        
+        if not clinic_id or not date:
+            return create_error_response(
+                message="Clinic ID and date are required",
+                error="Missing required fields"
+            )
+        
+        # Call the internal appointment API
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"http://localhost:8000/availability/{clinic_id}",
+                params={"date": date, "duration": duration}
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                return create_success_response(
+                    message=f"Found {data.get('total_slots', 0)} available slots on {date}",
+                    data=data
+                )
+            else:
+                return create_error_response(
+                    message="Failed to check availability",
+                    error=response.text
+                )
+                
+    except Exception as e:
+        return create_error_response(
+            message="Error checking availability",
+            error=str(e)
+        )
 
+@router.post("/calendly-book-appointment")
+async def webhook_calendly_book_appointment(request: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Book an appointment using Calendly/Google Calendar
+    """
+    try:
+        appointment_data = {
+            "clinic_id": request.get("clinic_id"),
+            "patient_id": request.get("patient_id"),
+            "date_time": request.get("date_time"),
+            "duration_minutes": request.get("duration_minutes", 30),
+            "appointment_type": request.get("appointment_type", "General Consultation"),
+            "notes": request.get("notes", "")
+        }
+        
+        # Validate required fields
+        if not all([appointment_data["clinic_id"], appointment_data["patient_id"], appointment_data["date_time"]]):
+            return create_error_response(
+                message="Missing required fields: clinic_id, patient_id, and date_time are required",
+                error="Validation error"
+            )
+        
+        # Call the internal appointment API
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                "http://localhost:8000/appointments",
+                json=appointment_data
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                return create_success_response(
+                    message="Appointment booked successfully!",
+                    data=data
+                )
+            else:
+                return create_error_response(
+                    message="Failed to book appointment",
+                    error=response.text
+                )
+                
+    except Exception as e:
+        return create_error_response(
+            message="Error booking appointment",
+            error=str(e)
+        )
 
+@router.post("/calendly-reschedule-appointment")
+async def webhook_calendly_reschedule_appointment(request: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Reschedule an existing Calendly/Google Calendar appointment
+    """
+    try:
+        appointment_id = request.get("appointment_id")
+        new_datetime = request.get("new_datetime")
+        
+        if not appointment_id or not new_datetime:
+            return create_error_response(
+                message="Appointment ID and new datetime are required",
+                error="Missing required fields"
+            )
+        
+        # Call the internal appointment API
+        async with httpx.AsyncClient() as client:
+            response = await client.put(
+                f"http://localhost:8000/appointments/{appointment_id}/reschedule",
+                json={"new_datetime": new_datetime}
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                return create_success_response(
+                    message="Appointment rescheduled successfully!",
+                    data=data
+                )
+            else:
+                return create_error_response(
+                    message="Failed to reschedule appointment",
+                    error=response.text
+                )
+                
+    except Exception as e:
+        return create_error_response(
+            message="Error rescheduling appointment",
+            error=str(e)
+        )
+
+@router.post("/calendly-cancel-appointment")
+async def webhook_calendly_cancel_appointment(request: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Cancel a Calendly/Google Calendar appointment
+    """
+    try:
+        appointment_id = request.get("appointment_id")
+        
+        if not appointment_id:
+            return create_error_response(
+                message="Appointment ID is required",
+                error="Missing required field"
+            )
+        
+        # Call the internal appointment API
+        async with httpx.AsyncClient() as client:
+            response = await client.delete(
+                f"http://localhost:8000/appointments/{appointment_id}"
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                return create_success_response(
+                    message="Appointment cancelled successfully",
+                    data=data
+                )
+            else:
+                return create_error_response(
+                    message="Failed to cancel appointment",
+                    error=response.text
+                )
+                
+    except Exception as e:
+        return create_error_response(
+            message="Error cancelling appointment",
+            error=str(e)
+        )
 
 # Test endpoint
 @router.get("/test")
@@ -955,7 +1119,12 @@ async def test_tools():
             "/api/tools/check-availability",
             "/api/tools/book-appointment", 
             "/api/tools/verify-patient",
-            "/api/tools/register-patient"
+            "/api/tools/register-patient",
+            # Calendly/Google Calendar endpoints
+            "/api/tools/calendly-check-availability",
+            "/api/tools/calendly-book-appointment",
+            "/api/tools/calendly-reschedule-appointment",
+            "/api/tools/calendly-cancel-appointment"
         ],
         "providers_supported": ["athena"],
         "usage": {

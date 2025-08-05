@@ -19,7 +19,7 @@ class ElevenLabsAgentCreator:
     
     def __init__(self):
         # Use the new ElevenLabs API key
-        self.api_key = "sk_4c02b8fb972529999df59ace915d45ef23b542255e48102d"
+        self.api_key = "sk_911c468b5acba9938859200fdc4f9b8ffa8584b7b17e7487"
         self.base_url = "https://api.elevenlabs.io/v1"
         
         if not self.api_key:
