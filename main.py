@@ -54,7 +54,7 @@ app.add_middleware(
 )
 
 # Include routers
-app.include_router(calender_router, prefix="/Calender", tags=["calender"])
+#app.include_router(calender_router, prefix="/Calender", tags=["calender"])
 app.include_router(clinic_router, prefix="/clinic",tags=["clinic-registration"])
 app.include_router(agent_setup_router, prefix="/api", tags=["Agent Setup"])
 #app.include_router(webhook_gen_router, prefix="", tags=["webhook-generator"])

@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 # Calendly OAuth configuration
 CALENDLY_CLIENT_ID = os.getenv("CALENDLY_CLIENT_ID")
 CALENDLY_CLIENT_SECRET = os.getenv("CALENDLY_CLIENT_SECRET")
-CALENDLY_REDIRECT_URI = os.getenv("CALENDLY_REDIRECT_URI", "http://localhost:8000/calendar/calendly/callback")
+CALENDLY_REDIRECT_URI = os.getenv("CALENDLY_REDIRECT_URI", "https://app.clinivocx.com")
 
 # Request models
 class CalendlyConnectRequest(BaseModel):

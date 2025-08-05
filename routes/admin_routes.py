@@ -19,7 +19,7 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/admin", tags=["Admin"])
+router = APIRouter()
 
 
 @router.get("/clinics/knowledge-base")
