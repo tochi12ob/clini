@@ -336,6 +336,7 @@ class AgentSetupService:
                     "duration_seconds": call.duration_seconds,
                     "started_at": call.started_at,
                     "ended_at": call.ended_at,
+                    "twilio_call_sid": call.twilio_call_sid,
                     "outcome": call.outcome,
                     "handoff_to_human": call.handoff_to_human,
                     "patient_satisfaction": call.patient_satisfaction,

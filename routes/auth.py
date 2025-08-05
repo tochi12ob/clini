@@ -161,33 +161,6 @@ async def login_clinic(
         expires_in=auth_service.access_token_expire_minutes * 60
     )
 
-@router.post("/login/staff", response_model=TokenResponse)
-async def login_staff(
-    login_data: StaffLoginRequest,
-    db: Session = Depends(get_db)
-):
-    """
-    Authenticate staff member and return access token
-    - **email**: Staff email address
-    - **password**: Staff password
-    """
-    staff = auth_service.authenticate_staff(db, login_data.email, login_data.password)
-    if not staff:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    access_token = auth_service.create_staff_token(staff)
-    
-    return TokenResponse(
-        access_token=access_token,
-        token_type="bearer", 
-        user_type="staff",
-        expires_in=auth_service.access_token_expire_minutes * 60
-    )
-
 @router.post("/register/clinic", response_model=ClinicResponse)
 async def register_clinic(
     registration_data: RegisterClinicRequest,
@@ -359,60 +332,6 @@ async def change_password(
     
     return {"message": "Password changed successfully"}
 
-@router.post("/register/staff/{clinic_id}")
-async def register_staff(
-    clinic_id: int,
-    registration_data: RegisterStaffRequest,
-    current_user: Dict[str, Any] = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """
-    Register a new staff member for a clinic
-    Only clinic owners or authorized staff can register new staff
-    - **clinic_id**: ID of the clinic to add staff to
-    - **first_name**: Staff first name
-    - **last_name**: Staff last name
-    - **email**: Staff email (must be unique)
-    - **role**: Staff role (admin, doctor, nurse, receptionist, etc.)
-    - **password**: Staff password
-    """
-    # Check if user has access to this clinic
-    require_clinic_access(current_user, clinic_id, db)
-    
-    # Additional check: only clinic owners or admin staff can register new staff
-    if current_user.get("user_type") == "staff":
-        current_staff = auth_service.get_staff_by_id(db, current_user.get("user_id"))
-        if not current_staff or current_staff.role.value not in ["admin", "manager"]:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Insufficient permissions to register staff"
-            )
-    
-    staff_data = registration_data.dict(exclude={"password"})
-    
-    try:
-        # Convert role string to enum - you'll need to adjust this based on your StaffRole enum
-        staff_data["role"] = StaffRole(registration_data.role)
-        
-        staff = auth_service.register_staff(db, staff_data, registration_data.password, clinic_id)
-        
-        return {
-            "id": staff.id,
-            "first_name": staff.first_name,
-            "last_name": staff.last_name,
-            "email": staff.email,
-            "role": staff.role.value if staff.role else None,
-            "clinic_id": staff.clinic_id,
-            "is_active": staff.is_active
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Staff registration failed: {str(e)}"
-        )
-
 @router.post("/verify-token")
 async def verify_token(current_user: Dict[str, Any] = Depends(get_current_user)):
     """
@@ -450,110 +369,6 @@ async def verify_clinic_email(
     else:
         raise HTTPException(status_code=400, detail="Invalid OTP or clinic ID.")
 
-# Access control helper routes
-@router.get("/clinic/{clinic_id}/access-check")
-async def check_clinic_access(
-    clinic_id: int,
-    current_user: Dict[str, Any] = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """
-    Check if current user has access to specified clinic
-    Useful for frontend authorization checks
-    """
-    has_access = auth_service.has_clinic_access(current_user, clinic_id, db)
-    
-    return {
-        "clinic_id": clinic_id,
-        "has_access": has_access,
-        "user_type": current_user.get("user_type"),
-        "user_id": current_user.get("user_id")
-    }
-
-@router.get("/clinic/{clinic_id}/setup-status")
-async def get_clinic_setup_status(
-    clinic_id: int,
-    current_user: Dict[str, Any] = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """
-    Get the setup status for a clinic's Twilio and ElevenLabs integrations
-    """
-    # Check if user has access to this clinic
-    require_clinic_access(current_user, clinic_id, db)
-    
-    try:
-        clinic = auth_service.get_clinic_by_id(db, clinic_id)
-        if not clinic:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Clinic not found"
-            )
-        
-        setup_results = getattr(clinic, 'setup_results', {})
-        
-        return {
-            "clinic_id": clinic_id,
-            "clinic_name": clinic.name,
-            "twilio_phone_number": getattr(clinic, 'twilio_phone_number', None),
-            "twilio_phone_sid": getattr(clinic, 'twilio_phone_sid', None),
-            "elevenlabs_agent_id": getattr(clinic, 'elevenlabs_agent_id', None),
-            "elevenlabs_agent_name": getattr(clinic, 'elevenlabs_agent_name', None),
-            "setup_results": setup_results,
-            "setup_complete": bool(
-                getattr(clinic, 'twilio_phone_number', None) and 
-                getattr(clinic, 'elevenlabs_agent_id', None)
-            )
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get setup status: {str(e)}"
-        )
-
-@router.post("/clinic/{clinic_id}/retry-setup")
-async def retry_clinic_setup(
-    clinic_id: int,
-    current_user: Dict[str, Any] = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """
-    Retry failed setup steps for a clinic's integrations
-    """
-    # Check if user has access to this clinic
-    require_clinic_access(current_user, clinic_id, db)
-    
-    try:
-        clinic = auth_service.get_clinic_by_id(db, clinic_id)
-        if not clinic:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Clinic not found"
-            )
-        
-        # Import setup service
-        from services.setup_service import clinic_setup_service
-        
-        # Retry setup
-        retry_results = clinic_setup_service.retry_failed_setup(clinic, db)
-        
-        return {
-            "clinic_id": clinic_id,
-            "clinic_name": clinic.name,
-            "retry_results": retry_results,
-            "message": "Setup retry completed"
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retry setup: {str(e)}"
-        )
 
 @router.get("/clinics")
 async def list_registered_clinics(db: Session = Depends(get_db)):
@@ -574,29 +389,3 @@ async def list_registered_clinics(db: Session = Depends(get_db)):
             "agent_name": clinic.elevenlabs_agent_name
         })
     return result
-
-@router.post("/admin/generate-webhook-json", response_model=WebhookToolGenRequest)
-async def admin_generate_webhook_json(
-    clinic_id: str = Body(...),
-    athena_client_id: str = Body(...),
-    athena_client_secret: str = Body(...),
-    athena_api_base_url: str = Body(...),
-    athena_practice_id: str = Body(...),
-    current_user: Dict[str, Any] = Depends(get_current_user)
-):
-    """
-    Generate the exact JSON payload for webhook tool generation for admins to copy and use elsewhere.
-    """
-    if current_user.get("user_type") != "admin":
-        raise HTTPException(status_code=403, detail="Admin access required")
-    return WebhookToolGenRequest(
-        clinic_id=clinic_id,
-        ehr="athena",
-        athena_creds=AthenaCredsModel(
-            athena_client_id=athena_client_id,
-            athena_client_secret=athena_client_secret,
-            athena_api_base_url=athena_api_base_url,
-            athena_practice_id=athena_practice_id
-        ),
-        epic_creds=None
-    )
