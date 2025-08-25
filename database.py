@@ -13,8 +13,7 @@ logger = logging.getLogger(__name__)
 
 # Database configuration from environment variables
 DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://neondb_owner:npg_V4ADHw8EdigL@ep-icy-breeze-ae0zwid3-pooler.c-2.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+    "DATABASE_URL"
 )
 
 # For testing, you might want to use SQLite
