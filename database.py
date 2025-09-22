@@ -16,33 +16,6 @@ DATABASE_URL = os.getenv(
     "DATABASE_URL"
 )
 
-# For testing, you might want to use SQLite
-TEST_DATABASE_URL = os.getenv(
-    "TEST_DATABASE_URL",
-    "sqlite:///./test_clinic_ai.db"
-)
-
-# Determine if we're in test mode
-TESTING = os.getenv("TESTING", "false").lower() == "true"
-
-# Use test database if in testing mode
-if TESTING:
-    SQLALCHEMY_DATABASE_URL = TEST_DATABASE_URL
-    engine = create_engine(
-        SQLALCHEMY_DATABASE_URL,
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-        echo=True  # Set to False in production
-    )
-else:
-    SQLALCHEMY_DATABASE_URL = DATABASE_URL
-    engine = create_engine(
-        SQLALCHEMY_DATABASE_URL,
-        pool_pre_ping=True,  # Verify connections before use
-        pool_recycle=300,    # Recycle connections every 5 minutes
-        echo=False  # Set to True for debugging SQL queries
-    )
-
 # Create SessionLocal class
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -283,76 +256,4 @@ def init_database():
         
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
-        raise
-
-# Utility functions for common database operations
-def get_or_create(session: Session, model, defaults=None, **kwargs):
-    """
-    Get an existing record or create a new one.
-    
-    Args:
-        session: Database session
-        model: SQLAlchemy model class
-        defaults: Dict of default values for creation
-        **kwargs: Filter criteria
-    
-    Returns:
-        Tuple of (instance, created_flag)
-    """
-    try:
-        instance = session.query(model).filter_by(**kwargs).first()
-        if instance:
-            return instance, False
-        else:
-            params = dict((k, v) for k, v in kwargs.items())
-            if defaults:
-                params.update(defaults)
-            instance = model(**params)
-            session.add(instance)
-            session.commit()
-            return instance, True
-    except Exception as e:
-        session.rollback()
-        logger.error(f"Error in get_or_create: {e}")
-        raise
-
-def safe_delete(session: Session, instance):
-    """
-    Safely delete an instance with error handling.
-    
-    Args:
-        session: Database session
-        instance: Model instance to delete
-    
-    Returns:
-        True if successful, False otherwise
-    """
-    try:
-        session.delete(instance)
-        session.commit()
-        return True
-    except Exception as e:
-        session.rollback()
-        logger.error(f"Error deleting instance: {e}")
-        return False
-
-def bulk_insert(session: Session, model, data_list: list):
-    """
-    Bulk insert data for better performance.
-    
-    Args:
-        session: Database session
-        model: SQLAlchemy model class
-        data_list: List of dictionaries with data to insert
-    
-    Returns:
-        Number of records inserted
-    """
-    try:
-        session.bulk_insert_mappings(model, data_list)
-        session.commit()
-        return len(data_list)
-    except Exception as e:
-        session.rollback()
-        logger.error(f"Error in bulk insert: {e}")
         raise
